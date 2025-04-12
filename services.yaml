@@ -1,0 +1,30 @@
+log_query:
+  description: "Query the logbook using log_qa.py."
+  fields:
+    question:
+      description: "The question to ask."
+      example: "What happened now?"
+    question_type:
+      description: "The type of question."
+      example: "all_events_now"
+    area_id:
+      description: "The area ID to filter by."
+      example: "living_room"
+    time_period:
+      description: "The time period to query."
+      example: "now"
+    entity_id:
+      description: "The entity ID to filter by."
+      example: "light.living_room"
+    domain:
+      description: "The domain to filter by."
+      example: "light"
+    device_class:
+      description: "The device class to filter by."
+      example: "motion"
+    state:
+      description: "The state to filter by."
+      example: "on"
+    enable_file_logging:
+      description: "Enable or disable file logging."
+      example: true
