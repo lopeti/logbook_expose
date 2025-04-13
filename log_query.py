@@ -30,20 +30,27 @@ async def log_query(hass, ha_token, question, question_type, area_id=None, time_
     Az időbélyeg-csoportosítást csak a torlódások felismerésére használja.
     
     Args:
-        question (str): A kérdés szövege.
-        question_type (str): A kérdés típusa (pl. "happenings", "area_events_now").
-        area_id (str): Az érintett terület neve például "konyha", "nappali"
-        time_period (str): Az időszak (pl. "ma", "tegnap", "last_hour").
-        entity_id (str): Az érintett entitás azonosítója.
-        domain (str): Az érintett domain (pl. "light", "sensor").
-        device_class (str): Az eszköz típusa.
-        state (str): Az entitás állapota.
+        question (str): The text of the question.
+        question_type (str): The type of the question (e.g., "happenings", "area_events_now").
+        area_id (str): The affected area name, e.g., "kitchen", "living room".
+        time_period (str): The time period (e.g., "today", "yesterday", "last_hour").
+        entity_id (str): The ID of the affected entity.
+        domain (str): The affected domain (e.g., "light", "sensor").
+        device_class (str): The type of the device.
+        state (str): The state of the entity.
     
     Returns:
         list: A logok listája, minden sor elején az időponttal.
     """
     _LOGGER.debug("log_query called with parameters: question=%s, question_type=%s, area_id=%s, time_period=%s, entity_id=%s, domain=%s, device_class=%s, state=%s",
                   question, question_type, area_id, time_period, entity_id, domain, device_class, state)
+
+    # Ensure only valid time_period values are handled
+    from .const import TIME_PERIODS
+
+    if time_period not in TIME_PERIODS:
+        _LOGGER.error("Invalid time_period value: %s", time_period)
+        return [f"Error: Invalid time_period value: {time_period}"]
 
     # Log the received area_id for debugging
     _LOGGER.debug("Received area_id: %s", area_id)
@@ -128,25 +135,30 @@ async def log_query(hass, ha_token, question, question_type, area_id=None, time_
     now = datetime.now(timezone.utc)
     _LOGGER.debug("Current UTC time: %s", now)
 
-    if time_period == "ma":
+    if time_period == "today":
         start_time = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    elif time_period == "tegnap":
+    elif time_period == "yesterday":
         start_time = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         end_time = start_time + timedelta(days=1)
     elif time_period == "last_hour":
         start_time = now - timedelta(hours=1)
+    elif time_period == "last_3_hours":
+        start_time = now - timedelta(hours=3)
+    elif time_period == "last_5_hours":
+        start_time = now - timedelta(hours=5)
+    elif time_period == "last_8_hours":
+        start_time = now - timedelta(hours=8)
+    elif time_period == "last_12_hours":
+        start_time = now - timedelta(hours=12)
     elif time_period == "last_24h":
         start_time = now - timedelta(hours=24)
     elif time_period.startswith("last_") and time_period.endswith("_minutes"):
         try:
             minutes = int(time_period.split("_")[1])
-            if minutes in [1, 5, 10, 15, 30]:
-                start_time = now - timedelta(minutes=minutes)
-            else:
-                raise ValueError("Invalid minute value")
+            start_time = now - timedelta(minutes=minutes)
         except ValueError:
             _LOGGER.error("Invalid time_period value: %s", time_period)
-            return [f"Hiba: Érvénytelen időszak: {time_period}"]
+            return [f"Error: Invalid time_period value: {time_period}"]
     else:
         start_time = now - timedelta(minutes=60)  # Alapértelmezett: utolsó 60 perc
     end_time = now

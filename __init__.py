@@ -6,7 +6,7 @@ from homeassistant.config_entries import ConfigEntry
 
 # Import dependencies from the local directory
 from .log_query import log_query
-from .const import DOMAIN
+from .const import DOMAIN, TIME_PERIODS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -19,6 +19,11 @@ os.makedirs(response_dir, exist_ok=True)
 
 async def run_log_query(hass, ha_token, question, question_type, area_id, time_period, entity_id, domain, device_class, state):
     """Run the log_query logic and return the result."""
+    # Replace hardcoded valid_time_periods with TIME_PERIODS from const.py
+    if time_period not in TIME_PERIODS:
+        _LOGGER.error("Invalid time_period value: %s", time_period)
+        return "Error: Invalid time_period value."
+
     try:
         return await log_query(hass, ha_token, question, question_type, area_id, time_period, entity_id, domain, device_class, state)
     except Exception as e:
@@ -105,3 +110,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     _LOGGER.info("Registered log_query service with set_logbook_expose trigger.")
 
     return True
+
+async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry):
+    """Reload logbook_expose from a config entry."""
+    await async_unload_entry(hass, entry)
+    await async_setup_entry(hass, entry)

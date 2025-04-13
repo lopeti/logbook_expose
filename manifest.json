@@ -2,7 +2,7 @@
   "domain": "logbook_expose",
   "name": "Logbook Expose",
   "version": "1.0.0",
-  "documentation": "https://github.com/lopeti/logbook_expose",
+  "documentation": "https://github.com/lopeti/logbook_expose/blob/main/README.md",
   "requirements": [],
   "codeowners": ["@lopeti"],
   "iot_class": "local_push",
