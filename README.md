@@ -1,7 +1,7 @@
 # Logbook Expose Integration
 
 ## Overview
-The **Logbook Expose** integration for Home Assistant allows users to query and analyze logbook events with extended attributes. Using this integration, you can provide access to the logbook for the Home Assistant assistant. It provides a flexible way to retrieve and process log data based on specific parameters such as time periods, areas, entities, and more.
+The **Logbook Expose** integration for Home Assistant is designed to provide seamless access to logbook events for conversation agents such as Google AI, ChatGPT, and others. This integration enables querying and analyzing logbook data with extended attributes, offering a flexible way to retrieve and process log information based on specific parameters like time periods, areas, entities, and more. By bridging Home Assistant's logbook with conversational AI, it empowers users to interact with their smart home data in a natural and intuitive way.
 
 ## Features
 - Query logbook events using custom time periods (e.g., `today`, `last_3_hours`, `last_5_minutes`).
