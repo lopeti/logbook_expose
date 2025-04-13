@@ -100,6 +100,32 @@ The following time periods are supported:
 - `last_15_minutes`
 - `last_30_minutes`
 
+## Custom Scripts Directory
+To use custom intent scripts with the Logbook Expose integration, you need to create a directory named `custom_scripts` in your Home Assistant configuration folder. This folder will store any additional or user-defined intent scripts.
+
+Example path:
+```
+/config/custom_scripts
+```
+
+## Built-in Intent Script Copying
+The integration automatically copies the built-in intent script file `logbook_expose_intent_scripts.yaml` to the `intent_scripts` directory in your Home Assistant configuration folder. This ensures that the default intents are always available for use.
+
+The copied file can be found at:
+```
+/config/intent_scripts/logbook_expose_intent_scripts.yaml
+```
+If the file does not exist in the source directory, a warning will be logged.
+
+## Including Intent Scripts in Configuration
+To include the intent scripts in your Home Assistant configuration, add the following to your `configuration.yaml` file:
+
+```yaml
+intent_script: !include_dir_merge_named intent_scripts
+```
+
+This configuration will merge all YAML files in the `intent_scripts` directory and make them available as intent scripts in Home Assistant.
+
 ## Debugging
 Enable file logging during setup to log requests and responses for debugging purposes. Logs are stored in the `log` directory within the integration folder.
 
