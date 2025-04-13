@@ -22,10 +22,13 @@ The **Logbook Expose** integration for Home Assistant is designed to provide sea
 1. Add the integration through the Home Assistant UI.
 2. Provide the required `ha_token` during setup.
 3. Optionally enable file logging for debugging purposes.
+4. Configure the character limit for response text.
 
 ### Configuration Options
 - **ha_token**: The Home Assistant token for API access.
 - **enable_file_logging**: Enable or disable file logging for debugging.
+- **char_limit**: Maximum number of characters allowed in the response text (default: 262,144).
+- **skip_unknown_states**: Skip entities with unknown state values (default: true).
 
 ## Usage
 ### Service: `logbook_expose.log_query`
@@ -34,12 +37,25 @@ This service allows querying the logbook with specific parameters.
 #### Parameters:
 - `question` (string): The text of the question.
 - `question_type` (string): The type of the question (e.g., `happenings`, `area_events_now`).
-- `area_id` (string): The affected area name (e.g., `kitchen`, `living room`).
+- `area_id` (string): The affected area name (e.g., `kitchen`, `living room`). Supports comma-separated values for multiple areas (e.g., `kitchen, dining room, hallway`).
 - `time_period` (string): The time period (e.g., `today`, `last_3_hours`, `last_5_minutes`).
 - `entity_id` (string): The ID of the affected entity.
 - `domain` (string): The affected domain (e.g., `light`, `sensor`).
 - `device_class` (string): The type of the device.
 - `state` (string): The state of the entity.
+
+#### Response Format:
+The response is formatted as a CSV-like text with three columns:
+```
+Time, Entity, Event
+2025-04-13 20:14:07, Kitchen Light, turned on
+2025-04-13 20:15:32, Front Door, door opened
+```
+
+Events are displayed with:
+- Timestamps in local time
+- Friendly entity names instead of entity_ids
+- Human-readable event descriptions based on device_class and state
 
 #### Example Service Call:
 ```yaml

@@ -20,7 +20,7 @@ response_dir = os.path.join(script_dir, "response")
 os.makedirs(log_dir, exist_ok=True)
 os.makedirs(response_dir, exist_ok=True)
 
-async def run_log_query(hass, ha_token, question, question_type, area_id, time_period, entity_id, domain, device_class, state):
+async def run_log_query(hass, ha_token, question, question_type, area_id, time_period, entity_id, domain, device_class, state, char_limit):
     """Run the log_query logic and return the result."""
     # Replace hardcoded valid_time_periods with TIME_PERIODS from const.py
     if time_period not in TIME_PERIODS:
@@ -28,7 +28,8 @@ async def run_log_query(hass, ha_token, question, question_type, area_id, time_p
         return "Error: Invalid time_period value."
 
     try:
-        return await log_query(hass, ha_token, question, question_type, area_id, time_period, entity_id, domain, device_class, state)
+        result = await log_query(hass, ha_token, question, question_type, area_id, time_period, entity_id, domain, device_class, state, char_limit)
+        return result
     except Exception as e:
         _LOGGER.error("Error running log_query logic: %s", e)
         return "Error: Unable to process the log query."
@@ -70,7 +71,7 @@ async def async_setup(hass: HomeAssistant, config: dict):
         device_class = call.data.get("device_class", "")
         state = call.data.get("state", "")
 
-        result = await run_log_query(hass, ha_token, question, question_type, area_id, time_period, entity_id, domain, device_class, state)
+        result = await run_log_query(hass, ha_token, question, question_type, area_id, time_period, entity_id, domain, device_class, state, config.get("char_limit", 262144))
         hass.states.async_set(
             "logbook_expose.last_result",
             "ok",  # Set a short state value
@@ -115,7 +116,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         device_class = call.data.get("device_class", "")
         state = call.data.get("state", "")
 
-        result = await run_log_query(hass, entry.data.get("ha_token"), question, question_type, area_id, time_period, entity_id, domain, device_class, state)
+        result = await run_log_query(hass, entry.data.get("ha_token"), question, question_type, area_id, time_period, entity_id, domain, device_class, state, entry.options.get("char_limit", 262144))
         hass.states.async_set(
             "logbook_expose.last_result",
             "ok",  # Set a short state value

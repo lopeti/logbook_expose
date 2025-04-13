@@ -53,12 +53,20 @@ class LogbookExposeOptionsFlowHandler(config_entries.OptionsFlow):
                 )
             return self.async_create_entry(title="", data=user_input)
 
-        return self.async_show_form(
-            step_id="init", data_schema=self._get_options_schema()
-        )
-
-    def _get_options_schema(self):
-        return vol.Schema({
-            vol.Optional("ha_token", default=self.config_entry.options.get("ha_token", "")): str,
+        data_schema = vol.Schema({
+            vol.Required("ha_token", default=self.config_entry.options.get("ha_token", "")): vol.All(str, vol.Length(min=1)),
             vol.Optional("enable_file_logging", default=self.config_entry.options.get("enable_file_logging", False)): bool,
+            vol.Optional("char_limit", default=self.config_entry.options.get("char_limit", 262144)): vol.All(vol.Coerce(int), vol.Range(min=1, max=262144)),
         })
+
+        descriptions = {
+            "ha_token": "The Home Assistant Long-Lived Access Token used for authentication.",
+            "enable_file_logging": "Enable or disable logging to files for debugging purposes.",
+            "char_limit": "Maximum number of characters allowed in the response text (default: 262,144).",
+        }
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=data_schema,
+            description_placeholders=descriptions
+        )
