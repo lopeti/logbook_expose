@@ -1,0 +1,41 @@
+LogAllEventsNow:
+  action:
+    - variables:
+        time_period: "{{ time_period | default('last_3_hours') }}"
+        query: "What happened now?"
+        question_type: "all_events_now"
+    - service: logbook_expose.log_query
+      data:
+        question: "{{ query }}"
+        question_type: "{{ question_type }}"
+        time_period: "{{ time_period }}"
+        area_id: ""
+        entity_id: ""
+        domain: ""
+        device_class: ""
+        state: ""
+  speech:
+    text: "The log query result:\n{{ state_attr('logbook_expose.last_result', 'logbook') if state_attr('logbook_expose.last_result', 'logbook') else 'no events found.' }}"
+
+LogAreaEventsNow:
+  action:
+    - variables:
+        area: "{{ area }}"
+        time_period: "{{ time_period | default('last_3_hours') }}"
+        query: "What happened in the {{ area }} area {{ time_period }}"
+        question_type: "area_events_now"
+        area_id: "{{ area }}"
+    - service: logbook_expose.log_query
+      data:
+        question: "{{ query }}"
+        question_type: "{{ question_type }}"
+        area_id: "{{ area_id }}"
+        time_period: "{{ time_period }}"
+        entity_id: ""
+        domain: ""
+        device_class: ""
+        state: ""
+  speech:
+    text: "The log query result:\n{{ state_attr('logbook_expose.last_result', 'logbook') if state_attr('logbook_expose.last_result', 'logbook') else 'no events found.' }}"
+
+    

@@ -1,8 +1,11 @@
 import logging
 import subprocess
 import os
+import yaml
+import shutil
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers import intent
 
 # Import dependencies from the local directory
 from .log_query import log_query
@@ -30,10 +33,31 @@ async def run_log_query(hass, ha_token, question, question_type, area_id, time_p
         _LOGGER.error("Error running log_query logic: %s", e)
         return "Error: Unable to process the log query."
 
+def copy_intent_script(hass: HomeAssistant):
+    """Copy the intent script file to the intent_scripts directory."""
+    try:
+        source_file = os.path.join(script_dir, "logbook_expose_intent_scripts.yaml")
+        config_dir = hass.config.config_dir
+        dest_dir = os.path.join(config_dir, "intent_scripts")
+        dest_file = os.path.join(dest_dir, "logbook_expose_intent_scripts.yaml")
+
+        os.makedirs(dest_dir, exist_ok=True)
+
+        if os.path.exists(source_file):
+            shutil.copy2(source_file, dest_file)
+            _LOGGER.info(f"Successfully copied {source_file} to {dest_file}")
+        else:
+            _LOGGER.warning(f"Source file {source_file} does not exist, could not copy to intent_scripts directory")
+    except Exception as e:
+        _LOGGER.error(f"Error copying intent scripts file: {e}")
+
 async def async_setup(hass: HomeAssistant, config: dict):
     """Set up the logbook_expose integration."""
     ha_token = config.get("ha_token", None)
     enable_file_logging = config.get("enable_file_logging", False)
+    
+    # Copy intent scripts file to the intent_scripts directory
+    copy_intent_script(hass)
 
     async def handle_log_query(call: ServiceCall):
         """Handle the log_query service call."""
@@ -78,6 +102,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = entry.data
 
+    copy_intent_script(hass)
+
     async def handle_log_query(call: ServiceCall):
         """Handle the log_query service call."""
         question = call.data.get("question", "")
@@ -115,3 +141,5 @@ async def async_reload_entry(hass: HomeAssistant, entry: ConfigEntry):
     """Reload logbook_expose from a config entry."""
     await async_unload_entry(hass, entry)
     await async_setup_entry(hass, entry)
+
+    copy_intent_script(hass)
