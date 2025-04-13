@@ -6,6 +6,9 @@ import re
 import os
 import asyncio
 
+# Import the format_events function
+from .event_formatter import format_events
+
 _LOGGER = logging.getLogger(__name__)
 
 # Ensure the log and response directories exist
@@ -24,7 +27,20 @@ async def log_to_file(filename, content):
     with open(file_path, "w", encoding="utf-8") as log_file:
         log_file.write(content)
 
-async def log_query(hass, ha_token, question, question_type, area_id=None, time_period=None, entity_id=None, domain=None, device_class=None, state=None):
+async def map_device_classes(hass):
+    """Fetch entity attributes and map device classes."""
+    entity_states = hass.states.async_all()
+    device_class_map = {}
+
+    for state in entity_states:
+        entity_id = state.entity_id
+        device_class = state.attributes.get("device_class")
+        if device_class:
+            device_class_map[entity_id] = device_class
+
+    return device_class_map
+
+async def log_query(hass, ha_token, question, question_type, area_id=None, time_period=None, entity_id=None, domain=None, device_class=None, state=None, char_limit=None):
     """
     Lekérdezi a logokat a megadott paraméterek alapján, és minden sor elejére írja az időpontot.
     Az időbélyeg-csoportosítást csak a torlódások felismerésére használja.
@@ -38,6 +54,7 @@ async def log_query(hass, ha_token, question, question_type, area_id=None, time_
         domain (str): The affected domain (e.g., "light", "sensor").
         device_class (str): The type of the device.
         state (str): The state of the entity.
+        char_limit (int): The character limit for the response text.
     
     Returns:
         list: A logok listája, minden sor elején az időponttal.
@@ -66,58 +83,61 @@ async def log_query(hass, ha_token, question, question_type, area_id=None, time_
         "Content-Type": "application/json"
     }
 
-    # Fetch area mappings using the /api/template endpoint
+    # Fetch area mappings and entity registry data directly using Home Assistant's registry objects
     async def fetch_area_mappings():
-        area_url = f"{home_assistant_url}/api/template"
-        payload = {"template": "{{ areas() }}"}
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(area_url, headers=headers, json=payload) as response:
-                    if response.status == 200:
-                        text_response = await response.text()
-                        # Parse the plain text response into a Python dictionary
-                        import yaml
-                        return yaml.safe_load(text_response)
-                    else:
-                        _LOGGER.error("Failed to fetch area mappings: %s", response.status)
-                        return []
+            area_registry = hass.data.get("area_registry")
+            if area_registry:
+                # Get areas directly from the registry
+                areas = list(area_registry.areas.values())
+                return [{"area_id": area.id, "name": area.name} for area in areas]
+            else:
+                _LOGGER.warning("Area registry not available")
+                return []
         except Exception as e:
             _LOGGER.error("Error fetching area mappings: %s", e)
             return []
 
-    # Fetch entity mappings using the /api/template endpoint
+    # Fetch entity registry data
     async def fetch_entity_mappings():
-        entity_url = f"{home_assistant_url}/api/template"
-        payload = {"template": "{{ states | map(attribute='entity_id') | list }}"}
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(entity_url, headers=headers, json=payload) as response:
-                    if response.status == 200:
-                        text_response = await response.text()
-                        # Parse the plain text response into a Python list
-                        import yaml
-                        return yaml.safe_load(text_response)
-                    else:
-                        _LOGGER.error("Failed to fetch entity mappings: %s", response.status)
-                        return []
+            entity_registry = hass.data.get("entity_registry")
+            if entity_registry:
+                # Get entity registry entries directly
+                entities = list(entity_registry.entities.values())
+                
+                # Create separate dictionaries for device_class and friendly_name
+                device_class_map = {}
+                friendly_name_map = {}
+                
+                for entity_id in [entity.entity_id for entity in entities]:
+                    state = hass.states.get(entity_id)
+                    if state:
+                        if "device_class" in state.attributes:
+                            device_class_map[entity_id] = state.attributes["device_class"]
+                        if "friendly_name" in state.attributes:
+                            friendly_name_map[entity_id] = state.attributes["friendly_name"]
+                
+                _LOGGER.debug("Fetched device classes for %s entities", len(device_class_map))
+                _LOGGER.debug("Fetched friendly names for %s entities", len(friendly_name_map))
+                return device_class_map, friendly_name_map
+            else:
+                _LOGGER.warning("Entity registry not available")
+                return {}, {}
         except Exception as e:
             _LOGGER.error("Error fetching entity mappings: %s", e)
-            return []
+            return {}, {}
 
     # Fetch area and entity mappings
     area_mappings = await fetch_area_mappings()
-    entity_mappings = await fetch_entity_mappings()
+    device_class_mappings, friendly_name_mappings = await fetch_entity_mappings()
 
-    # Ensure entity_mappings is a list
-    if not isinstance(entity_mappings, list):
-        _LOGGER.error("Unexpected format for entity mappings: %s", entity_mappings)
-        return []
+    # Update logging to show the correct type
+    _LOGGER.debug("Device class mappings type: %s with %d entries", type(device_class_mappings), len(device_class_mappings))
+    _LOGGER.debug("Friendly name mappings type: %s with %d entries", type(friendly_name_mappings), len(friendly_name_mappings))
+    _LOGGER.debug("Device class mappings sample: %s", dict(list(device_class_mappings.items())[:5]))  # Show first 5 items
+    _LOGGER.debug("Friendly name mappings sample: %s", dict(list(friendly_name_mappings.items())[:5]))  # Show first 5 items
 
-    # Since entity_mappings is a list of strings (entity_ids), we need a different approach
-    entity_to_area = {}
-    # We'll log this fact instead of trying to process entities as dictionaries
-    _LOGGER.debug("Entity mappings contains %d entity IDs as strings", len(entity_mappings))
-    
     # Create a mapping of area_id to area name (adjust for list format)
     area_id_to_name = {}
     if isinstance(area_mappings, list):
@@ -172,8 +192,20 @@ async def log_query(hass, ha_token, question, question_type, area_id=None, time_
 
     # API hívás
     params = {"end_time": end_time_str}
+    if entity_id:
+        params["entity_id"] = entity_id
     api_url = f"{base_url}/{start_time_str}"
     _LOGGER.debug("API URL: %s, Params: %s", api_url, params)
+
+    # Tracking counters for debugging
+    total_entries = 0
+    filtered_entries = 0
+    area_filtered = 0
+    entity_filtered = 0
+    domain_filtered = 0
+    device_class_filtered = 0
+    state_filtered = 0
+    ignore_filtered = 0
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -182,13 +214,18 @@ async def log_query(hass, ha_token, question, question_type, area_id=None, time_
                 if response.status != 200:
                     return [f"Hiba a logok lekérdezése során: {response.status}"]
                 logbook_data = await response.json()
-                _LOGGER.debug("API response data: %s", logbook_data[:100])
+                _LOGGER.debug("API logbook data length: %d entries", len(logbook_data))
+                # Log a few entries to debug
+                if len(logbook_data) > 0:
+                    _LOGGER.debug("First few logbook entries: %s", logbook_data[:3])
+                else:
+                    _LOGGER.warning("No logbook entries returned from API")
 
-                # Log request and response to a file
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                log_filename = f"log_{timestamp}.txt"
-                log_content = f"Request: {params}\nResponse: {logbook_data}"
-                await log_to_file(log_filename, log_content)
+                # Log request and response to a file - disabled
+                # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                # log_filename = f"log_{timestamp}.txt"
+                # log_content = f"Request: {params}\nResponse: {logbook_data}"
+                # await log_to_file(log_filename, log_content)
 
     except Exception as e:
         _LOGGER.error("Error during API call: %s", e)
@@ -197,8 +234,14 @@ async def log_query(hass, ha_token, question, question_type, area_id=None, time_
     # Define ignored entities list
     ignored_entities = ["sensor.date_time"]
 
-    # Események csoportosítása időbélyeg szerint a torlódások felismeréséhez
-    grouped_events = {}
+    # Prepare structured events for formatting
+    structured_events = []
+    last_event = None
+    total_entries = len(logbook_data)
+    filtered_entries = 0
+    duplicate_entries = 0
+    
+    # Process logbook entries
     for entry in logbook_data:
         entry_entity_id = entry.get("entity_id", "")
         entry_state = entry.get("state", "")
@@ -206,6 +249,7 @@ async def log_query(hass, ha_token, question, question_type, area_id=None, time_
 
         # Skip ignored entities
         if entry_entity_id in ignored_entities:
+            ignore_filtered += 1
             continue
 
         # Időbélyeg konvertálása helyi időre
@@ -219,60 +263,133 @@ async def log_query(hass, ha_token, question, question_type, area_id=None, time_
 
         # Szűrés a paraméterek alapján
         if area_id:
-            # Debug logging for area-based filtering
-            area_name_lower = area_id.lower()
-            _LOGGER.debug("Filtering for area_name_lower: %s", area_name_lower)
-            _LOGGER.debug("Available area names: %s", list(area_id_to_name.values()))
+            # Split area_id by commas to support multiple areas
+            area_ids = [aid.strip().lower() for aid in area_id.split(',')]
+            _LOGGER.debug("Filtering for multiple areas: %s", area_ids)
             
-            # More flexible area matching logic - check if any part of the name matches
+            # More flexible area matching logic - check if any part of the name matches any area
             found_match = False
             for entity_name in [entry_entity_id, entry.get("name", ""), entry.get("attributes", {}).get("friendly_name", "")]:
-                if area_name_lower in entity_name.lower():
-                    found_match = True
-                    _LOGGER.debug("Found area match in entity: %s", entity_name)
+                if not entity_name:
+                    continue
+                    
+                entity_name_lower = entity_name.lower()
+                for single_area_id in area_ids:
+                    if single_area_id in entity_name_lower:
+                        found_match = True
+                        _LOGGER.debug("Found area match: entity '%s' matches area '%s'", entity_name, single_area_id)
+                        break
+                
+                if found_match:
                     break
             
             if not found_match:
+                area_filtered += 1
                 continue
         if entity_id and entity_id != entry_entity_id:
+            entity_filtered += 1
             continue
         if domain and not entry_entity_id.startswith(f"{domain}."):
+            domain_filtered += 1
             continue
-        if device_class and device_class not in entry.get("attributes", {}).get("device_class", ""):
+        if device_class and device_class != entry.get("attributes", {}).get("device_class", ""):
+            device_class_filtered += 1
             continue
         if state and state != entry_state:
+            state_filtered += 1
             continue
 
-        # Események csoportosítása időbélyeg szerint
-        if formatted_time not in grouped_events:
-            grouped_events[formatted_time] = []
-        grouped_events[formatted_time].append(f"{formatted_time} {entry_entity_id:<30} {entry_state}")
+        # Fetch device_class from device_class_mappings if available
+        device_class_value = entry.get("attributes", {}).get("device_class", "")
+        if not device_class_value and entry_entity_id in device_class_mappings:
+            device_class_value = device_class_mappings[entry_entity_id]
+            _LOGGER.debug("Found device_class '%s' for entity %s in device_class_mappings", device_class_value, entry_entity_id)
 
-    # Csoportosított események formázása
-    processed_logs = []
-    for timestamp, events in sorted(grouped_events.items(), reverse=True):  # Legfrissebb események előre
-        if len(events) > 3:
-            # Ha több mint 3 esemény van, csak egy összegző sort adjuk hozzá
-            processed_logs.append(f"{timestamp} esemény torlódás (a rendszer valószínűleg újratöltötte az entitások állapotait) {len(events)} event \n")
+        # Fetch friendly name from various sources
+        friendly_name = None
+        
+        # Try to get from entry name first
+        if entry.get("name"):
+            friendly_name = entry.get("name")
+        # Then try from attributes
+        elif entry.get("attributes", {}).get("friendly_name"):
+            friendly_name = entry.get("attributes", {}).get("friendly_name")
+        # If not found, try to get it from hass states
         else:
-            # Ha 3 vagy kevesebb esemény van, mindet hozzáadjuk
-            processed_logs.extend(events)
+            state_obj = hass.states.get(entry_entity_id)
+            if state_obj:
+                friendly_name = state_obj.attributes.get("friendly_name", entry_entity_id)
+            else:
+                friendly_name = entry_entity_id
+        
+        _LOGGER.debug("Entity: %s, Friendly name: %s", entry_entity_id, friendly_name)
 
-    # Ensure logbook entries are properly formatted to avoid multi-line YAML issues
-    formatted_logs = []
-    for log in processed_logs:
-        formatted_logs.append(log.replace("\n", " ").strip())
+        # Create a structured event dictionary with friendly name
+        current_event = {
+            "timestamp": formatted_time,
+            "entity_id": entry_entity_id,
+            "friendly_name": friendly_name,
+            "state": entry_state,
+            "device_class": device_class_value,
+            "event_description": generate_event_description(device_class_value, entry_state)
+        }
+        # skip empty device_class
+        if current_event["device_class"] == "" or current_event["device_class"] == "firmware":
+            device_class_filtered += 1
+            continue
 
-    # Convert the processed logs list into a single string with each log on a new line
-    response_text = "\n".join(processed_logs)
+        # skip unknown states
+        if current_event["state"] == "unknown":
+            ignore_filtered += 1
+            continue
+        # Filter duplicate events (same second-level timestamp)
+        if last_event and last_event["timestamp"][:19] == current_event["timestamp"][:19]:
+            _LOGGER.debug("Skipping duplicate event with timestamp: %s", current_event["timestamp"][:19])
+            continue
 
-    # Store the response in the input_text entity for the template sensor
-    try:
-        # Write the response to a file for the file sensor
-        response_file_path = os.path.join(response_dir, "log_query_response.txt")
-        with open(response_file_path, "w", encoding="utf-8") as response_file:
-            response_file.write(response_text)
-    except Exception as e:
-        _LOGGER.error("Failed to write response to file: %s", e)
 
+        # Add event to structured_events list
+        structured_events.append(current_event)
+        last_event = current_event
+
+    # Log statistics
+    _LOGGER.debug("Event processing statistics: Total=%d, Passed filters=%d, Area filtered=%d, Entity filtered=%d, Domain filtered=%d, Device class filtered=%d, State filtered=%d, Ignored=%d", 
+                 total_entries, filtered_entries, area_filtered, entity_filtered, domain_filtered, device_class_filtered, state_filtered, ignore_filtered)
+    _LOGGER.debug("Number of structured events: %d", len(structured_events))
+
+    # Define a default character limit and validate it
+    DEFAULT_CHAR_LIMIT = 262144
+    if char_limit > DEFAULT_CHAR_LIMIT:
+        _LOGGER.warning("Provided char_limit exceeds the maximum allowed size (%d). Using default value (%d).", DEFAULT_CHAR_LIMIT, DEFAULT_CHAR_LIMIT)
+        char_limit = DEFAULT_CHAR_LIMIT
+
+    # Add a header to the response text
+    response_text = "Time, Entity, Event\n"
+    for event in structured_events:
+        event_text = f"{event['timestamp']}, {event['friendly_name']}, {event['event_description']}\n"
+        if len(response_text) + len(event_text) > char_limit:
+            _LOGGER.warning("Reached character limit of %d. Truncating response.", char_limit)
+            break
+        response_text += event_text
+
+    # Return the plain text response
     return response_text
+
+
+
+def generate_event_description(device_class, state):
+    """Generate a human-readable event description based on device_class and state."""
+    if device_class == "occupancy" or device_class == "motion":
+        return "motion detected" if state == "on" else "motion stopped"
+    elif device_class == "door":
+        return "door opened" if state == "on" else "door closed"
+    elif device_class == "window":
+        return "window opened" if state == "on" else "window closed"
+    elif device_class == "presence":
+        return "presence detected" if state in ["on", "home"] else "presence stopped"
+    elif device_class == "light":
+        return "turned on" if state == "on" else "turned off"
+    elif device_class == "lock":
+        return "locked" if state == "locked" else "unlocked"
+    else:
+        return f"state changed to {state}"

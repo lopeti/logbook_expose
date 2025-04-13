@@ -1,7 +1,7 @@
 LogAllEventsNow:
   action:
     - variables:
-        time_period: "{{ time_period | default('last_3_hours') }}"
+        time_period: "{{ time_period | default('last_hour') }}"
         query: "What happened now?"
         question_type: "all_events_now"
     - service: logbook_expose.log_query
@@ -21,7 +21,7 @@ LogAreaEventsNow:
   action:
     - variables:
         area: "{{ area }}"
-        time_period: "{{ time_period | default('last_3_hours') }}"
+        time_period: "{{ time_period | default('last_hour') }}"
         query: "What happened in the {{ area }} area {{ time_period }}"
         question_type: "area_events_now"
         area_id: "{{ area }}"
@@ -38,4 +38,24 @@ LogAreaEventsNow:
   speech:
     text: "The log query result:\n{{ state_attr('logbook_expose.last_result', 'logbook') if state_attr('logbook_expose.last_result', 'logbook') else 'no events found.' }}"
 
-    
+LogDeviceEventsNow:
+  action:
+    - variables:
+        device: "{{ device }}"
+        time_period: "{{ time_period | default('last_hour') }}"
+        query: "What happened with the {{ device }} device {{ time_period }}"
+        question_type: "device_events_now"
+        entity_id: "{{ device }}"
+    - service: logbook_expose.log_query
+      data:
+        question: "{{ query }}"
+        question_type: "{{ question_type }}"
+        entity_id: "{{ entity_id }}"
+        time_period: "{{ time_period }}"
+        area_id: ""
+        domain: ""
+        device_class: ""
+        state: ""
+  speech:
+    text: "The log query result:\n{{ state_attr('logbook_expose.last_result', 'logbook') if state_attr('logbook_expose.last_result', 'logbook') else 'no events found.' }}"
+
