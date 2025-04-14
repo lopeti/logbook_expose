@@ -1,5 +1,7 @@
 # Logbook Expose Integration
 
+**Note:** This project is in an early stage of development.
+
 ## Overview
 The **Logbook Expose** integration for Home Assistant is designed to provide seamless access to logbook events for conversation agents such as Google AI, ChatGPT, and others. This integration enables querying and analyzing logbook data with extended attributes, offering a flexible way to retrieve and process log information based on specific parameters like time periods, areas, entities, and more. By bridging Home Assistant's logbook with conversational AI, it empowers users to interact with their smart home data in a natural and intuitive way.
 
@@ -37,7 +39,7 @@ This service allows querying the logbook with specific parameters.
 #### Parameters:
 - `question` (string): The text of the question.
 - `question_type` (string): The type of the question (e.g., `happenings`, `area_events_now`).
-- `area_id` (string): The affected area name (e.g., `kitchen`, `living room`). Supports comma-separated values for multiple areas (e.g., `kitchen, dining room, hallway`).
+- `area_id` (string): The affected area. It can be the area name or alias. Supports comma-separated values for multiple areas (e.g., `kitchen, dining room, hallway`).
 - `time_period` (string): The time period (e.g., `today`, `last_3_hours`, `last_5_minutes`).
 - `entity_id` (string): The ID of the affected entity.
 - `domain` (string): The affected domain (e.g., `light`, `sensor`).
