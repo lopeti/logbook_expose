@@ -40,27 +40,9 @@ async def map_device_classes(hass):
 
     return device_class_map
 
-async def log_query(hass, ha_token, question, question_type, area_id=None, time_period=None, entity_id=None, domain=None, device_class=None, state=None, char_limit=None):
-    """
-    Lekérdezi a logokat a megadott paraméterek alapján, és minden sor elejére írja az időpontot.
-    Az időbélyeg-csoportosítást csak a torlódások felismerésére használja.
-    
-    Args:
-        question (str): The text of the question.
-        question_type (str): The type of the question (e.g., "happenings", "area_events_now").
-        area_id (str): The affected area name, e.g., "kitchen", "living room".
-        time_period (str): The time period (e.g., "today", "yesterday", "last_hour").
-        entity_id (str): The ID of the affected entity.
-        domain (str): The affected domain (e.g., "light", "sensor").
-        device_class (str): The type of the device.
-        state (str): The state of the entity.
-        char_limit (int): The character limit for the response text.
-    
-    Returns:
-        list: A logok listája, minden sor elején az időponttal.
-    """
-    _LOGGER.debug("log_query called with parameters: question=%s, question_type=%s, area_id=%s, time_period=%s, entity_id=%s, domain=%s, device_class=%s, state=%s",
-                  question, question_type, area_id, time_period, entity_id, domain, device_class, state)
+async def log_query(hass, ha_token, question, question_type, area_name_or_alias=None, time_period=None, entity_id=None, domain=None, device_class=None, state=None, char_limit=None):
+    _LOGGER.debug("log_query called with parameters: question=%s, question_type=%s, area_name_or_alias=%s, time_period=%s, entity_id=%s, domain=%s, device_class=%s, state=%s",
+                  question, question_type, area_name_or_alias, time_period, entity_id, domain, device_class, state)
 
     # Ensure only valid time_period values are handled
     from .const import TIME_PERIODS
@@ -68,12 +50,6 @@ async def log_query(hass, ha_token, question, question_type, area_id=None, time_
     if time_period not in TIME_PERIODS:
         _LOGGER.error("Invalid time_period value: %s", time_period)
         return [f"Error: Invalid time_period value: {time_period}"]
-
-    # Log the received area_id for debugging
-    _LOGGER.debug("Received area_id: %s", area_id)
-
-    if not area_id:
-        _LOGGER.warning("No area_id provided. Please check the intent configuration.")
 
     # Retrieve home_assistant_url from Home Assistant configuration
     home_assistant_url = hass.config.internal_url or hass.config.external_url
@@ -88,11 +64,13 @@ async def log_query(hass, ha_token, question, question_type, area_id=None, time_
         try:
             area_registry = hass.data.get("area_registry")
             if area_registry:
-                # Get areas directly from the registry
                 areas = list(area_registry.areas.values())
-                return [{"area_id": area.id, "name": area.name} for area in areas]
+                if not areas:
+                    _LOGGER.warning("No areas found in area_registry.")
+                # Access attributes directly instead of using .get()
+                return [{"area_id": area.id, "name": area.name, "aliases": area.aliases if hasattr(area, "aliases") else []} for area in areas]
             else:
-                _LOGGER.warning("Area registry not available")
+                _LOGGER.warning("Area registry not available in hass.data.")
                 return []
         except Exception as e:
             _LOGGER.error("Error fetching area mappings: %s", e)
@@ -130,26 +108,51 @@ async def log_query(hass, ha_token, question, question_type, area_id=None, time_
 
     # Fetch area and entity mappings
     area_mappings = await fetch_area_mappings()
-    device_class_mappings, friendly_name_mappings = await fetch_entity_mappings()
+    if not area_mappings:
+        _LOGGER.error("Area mappings are empty. Please check the area registry configuration.")
+        return [f"Error: No areas found in the area registry."]
 
+    device_class_mappings, friendly_name_mappings = await fetch_entity_mappings()
+    
     # Update logging to show the correct type
     _LOGGER.debug("Device class mappings type: %s with %d entries", type(device_class_mappings), len(device_class_mappings))
     _LOGGER.debug("Friendly name mappings type: %s with %d entries", type(friendly_name_mappings), len(friendly_name_mappings))
     _LOGGER.debug("Device class mappings sample: %s", dict(list(device_class_mappings.items())[:5]))  # Show first 5 items
     _LOGGER.debug("Friendly name mappings sample: %s", dict(list(friendly_name_mappings.items())[:5]))  # Show first 5 items
+    _LOGGER.debug("Area mappings type: %s with %d entries", type(area_mappings), len(area_mappings))
 
-    # Create a mapping of area_id to area name (adjust for list format)
+    # Create a mapping of area_id to area name and aliases
     area_id_to_name = {}
+    area_alias_to_id = {}
     if isinstance(area_mappings, list):
         for area_item in area_mappings:
-            if isinstance(area_item, str):
-                # If area_item is just the area name
-                area_id_to_name[area_item.lower()] = area_item.lower()
-            elif isinstance(area_item, dict) and "area_id" in area_item and "name" in area_item:
-                # If area_item is a dictionary with area_id and name
+            if isinstance(area_item, dict) and "area_id" in area_item and "name" in area_item:
                 area_id_to_name[area_item["area_id"]] = area_item["name"].lower()
+                for alias in area_item.get("aliases", []):
+                    area_alias_to_id[alias.lower()] = area_item["area_id"]
     else:
         _LOGGER.warning("Unexpected format for area mappings: %s", type(area_mappings))
+
+    # Combine area names and aliases into a single lookup
+    area_name_to_id = {**area_id_to_name, **area_alias_to_id}
+
+    # Convert area_name_or_alias to a list of area IDs
+    area_ids = set()
+    if area_name_or_alias:
+        # Split area_name_or_alias by commas and normalize to lowercase
+        area_names_or_aliases = [name.strip().lower() for name in area_name_or_alias.split(',')]
+        _LOGGER.debug("Filtering for multiple areas (names or aliases): %s", area_names_or_aliases)
+
+        # Map area names or aliases to area IDs using area_name_to_id
+        for area in area_names_or_aliases:
+            if area in area_name_to_id:
+                resolved_area_id = area_name_to_id[area]
+                area_ids.add(resolved_area_id)
+                _LOGGER.debug("Resolved '%s' to area_id '%s'", area, resolved_area_id)
+            else:
+                _LOGGER.warning("Area name or alias '%s' could not be resolved to an area ID.", area)
+
+        _LOGGER.debug("Final resolved area IDs for filtering: %s", area_ids)
 
     # Időintervallum kiszámítása
     now = datetime.now(timezone.utc)
@@ -221,12 +224,6 @@ async def log_query(hass, ha_token, question, question_type, area_id=None, time_
                 else:
                     _LOGGER.warning("No logbook entries returned from API")
 
-                # Log request and response to a file - disabled
-                # timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                # log_filename = f"log_{timestamp}.txt"
-                # log_content = f"Request: {params}\nResponse: {logbook_data}"
-                # await log_to_file(log_filename, log_content)
-
     except Exception as e:
         _LOGGER.error("Error during API call: %s", e)
         return [f"Hiba a logok lekérdezése során: {e}"]
@@ -247,6 +244,25 @@ async def log_query(hass, ha_token, question, question_type, area_id=None, time_
         entry_state = entry.get("state", "")
         entry_when = entry.get("when", "")
 
+        # Check if the entity has conversation expose option set to True
+        entity_registry = hass.data.get("entity_registry")
+        if entity_registry:
+            entity_entry = entity_registry.entities.get(entry_entity_id)
+            if entity_entry:
+                expose_option = entity_entry.options.get("conversation", {}).get("should_expose", False)
+                if not expose_option:
+                    _LOGGER.debug("Skipping entity '%s' because conversation expose option is not True", entry_entity_id)
+                    ignore_filtered += 1
+                    continue
+            else:
+                _LOGGER.debug("Entity '%s' not found in entity_registry", entry_entity_id)
+        else:
+            _LOGGER.warning("Entity registry not available in hass.data")
+            
+# binary_sensor.bejarat_motion_detected - if we detected this device, just take a log from it
+        if entry_entity_id == "binary_sensor.bejarat_motion_detected":
+            _LOGGER.debug("Found entry for binary_sensor.bejarat_motion_detected, using its state")
+
         # Skip ignored entities
         if entry_entity_id in ignored_entities:
             ignore_filtered += 1
@@ -261,31 +277,34 @@ async def log_query(hass, ha_token, question, question_type, area_id=None, time_
             _LOGGER.warning("Invalid timestamp format: %s", entry_when)
             continue
 
-        # Szűrés a paraméterek alapján
-        if area_id:
-            # Split area_id by commas to support multiple areas
-            area_ids = [aid.strip().lower() for aid in area_id.split(',')]
-            _LOGGER.debug("Filtering for multiple areas: %s", area_ids)
-            
-            # More flexible area matching logic - check if any part of the name matches any area
-            found_match = False
-            for entity_name in [entry_entity_id, entry.get("name", ""), entry.get("attributes", {}).get("friendly_name", "")]:
-                if not entity_name:
-                    continue
-                    
-                entity_name_lower = entity_name.lower()
-                for single_area_id in area_ids:
-                    if single_area_id in entity_name_lower:
-                        found_match = True
-                        _LOGGER.debug("Found area match: entity '%s' matches area '%s'", entity_name, single_area_id)
-                        break
-                
-                if found_match:
-                    break
-            
-            if not found_match:
+        # Filter by area IDs
+        if area_ids:
+            # Fetch the actual area_id of the entity from the entity registry
+            actual_area_id = None
+            entity_registry = hass.data.get("entity_registry")
+            device_registry = hass.data.get("device_registry")
+            if entity_registry:
+                entity_entry = entity_registry.entities.get(entry_entity_id)
+                if entity_entry:
+                    actual_area_id = entity_entry.area_id
+                    if not actual_area_id and entity_entry.device_id and device_registry:
+                        device_entry = device_registry.devices.get(entity_entry.device_id)
+                        if device_entry:
+                            actual_area_id = device_entry.area_id
+                            #_LOGGER.debug("Fetched area_id '%s' from device_registry for entity '%s'", actual_area_id, entry_entity_id)
+                else:
+                    _LOGGER.debug("Entity '%s' not found in entity_registry", entry_entity_id)
+            else:
+                _LOGGER.warning("Entity registry not available in hass.data")
+
+            # Check if the actual area_id matches any of the resolved area IDs
+            if actual_area_id and actual_area_id in area_ids:
+                _LOGGER.debug("Entity '%s' matches area_id '%s'", entry_entity_id, actual_area_id)
+            else:
+                #_LOGGER.debug("Entity '%s' with actual_area_id '%s' does not match any area_id in %s", entry_entity_id, actual_area_id, area_ids)
                 area_filtered += 1
                 continue
+
         if entity_id and entity_id != entry_entity_id:
             entity_filtered += 1
             continue
