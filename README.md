@@ -38,13 +38,15 @@ This service allows querying the logbook with specific parameters.
 
 #### Parameters:
 - `question` (string): The text of the question.
-- `question_type` (string): The type of the question (e.g., `happenings`, `area_events_now`).
+- `question_type` (string): The type of the question (e.g., `custom_query`).
 - `area_id` (string): The affected area. It can be the area name or alias. Supports comma-separated values for multiple areas (e.g., `kitchen, dining room, hallway`).
-- `time_period` (string): The time period (e.g., `today`, `last_3_hours`, `last_5_minutes`).
+- `time_period` (string): The time period (e.g., `today`, `last 3 hours`, `last 5 minutes`).
 - `entity_id` (string): The ID of the affected entity.
 - `domain` (string): The affected domain (e.g., `light`, `sensor`).
 - `device_class` (string): The type of the device.
 - `state` (string): The state of the entity.
+- `start_time` (string, optional): Explicit start time for the query (format: `YYYY-MM-DD HH:MM:SS`). Optional if `time_period` is filled.
+- `end_time` (string, optional): Explicit end time for the query (format: `YYYY-MM-DD HH:MM:SS`). Optional if `time_period` is filled.
 
 #### Response Format:
 The response is formatted as a CSV-like text with three columns:
@@ -75,48 +77,95 @@ data:
 
 ### Intent Scripts
 The integration supports intent scripts for natural language queries. Example intents include:
-- **LogAllEventsNow**: Query all events for the current time.
-- **LogAreaEventsNow**: Query events for a specific area and time period.
+- **LBEQueryLogbook**: Query events using a flexible time period, device, and area.
 
 #### Example Intent Script:
 ```yaml
-LogAreaEventsNow:
+LBEQueryLogbook:
+  description: |
+    Queries the Home Assistant logbook and returns events based on specified criteria.
+    This intent allows users to ask questions about events related to devices, areas, or general activity within a specified time period.
+    The response provides a summary of the log events, including timestamps, entities, and event descriptions.
+
+    Example questions:
+      - "What happened in the living room in the last hour?"
+      - "What happened with the kitchen light today?"
+      - "What happened in the last 5 minutes?"
+      - "What happened between 2024-01-01 00:00:00 and 2024-01-02 00:00:00?"
+      - "Tell me about the events in the last 3 hours."
+      - "What happened with the thermostat yesterday?"
+      - "What happened in the bedroom 2 days ago?"
+      - "How many times did the doorbell ring in the last hour?"
+      - "Since when has the entrance door been open?"
+      - "What is the total duration of the terrace door being open in the last hour?"
+      - "List all the bath usage events in the last 3 hours with timestamps and durations."
+      You can use multiple calls to the logbook_expose.log_query service to comparing different time periods or devices.
+      - "Did you see more animals in the garden tonight or last night?
+
+    Parameters:
+      - time_period: The time period to query (e.g., last 1 hour, today, yesterday, last 5 minutes, last 3 hours, 2 days ago). Defaults to last_hour if not provided.
+      - device: The name of the device to filter events by.
+      - area: The name of the area to filter events by.
+      - start_time: Explicit start time for the query (format: YYYY-MM-DD HH:MM:SS). Optional.
+      - end_time: Explicit end time for the query (format: YYYY-MM-DD HH:MM:SS). Optional.
+
+    Response:
+      Returns a plain text summary of log events matching the specified criteria.
+      Sample response:
+        "The log query result:\n- 2024-01-01 12:00:00: Living room light turned on\n- 2024-01-01 12:05:00: Living room light turned off"
+      If no events are found, returns a message indicating that no events were found.
+      You can use the `logbook_expose.last_result` entity to access the raw logbook data for further processing or display.      
   action:
     - variables:
-        area: "{{ area }}"
-        time_period: "{{ time_period | default('now') }}"
-        query: "What happened in the {{ area }} area {{ time_period }}"
-        question_type: "area_events_now"
-        area_id: "{{ area }}"
+        time_period: "{{ time_period | default('last 1 hour') }}"
+        device: "{{ device | default('') }}"
+        area: "{{ area | default('') }}"
+        start_time: "{{ start_time | default('') }}"
+        end_time: "{{ end_time | default('') }}"
+        query: >
+          {% if start_time and end_time %}
+            What happened between {{ start_time }} and {{ end_time }}?
+          {% elif device and area %}
+            What happened with the {{ device }} device in the {{ area }} area in the {{ time_period }}?
+          {% elif device %}
+            What happened with the {{ device }} device in the {{ time_period }}?
+          {% elif area %}
+            What happened in the {{ area }} area in the {{ time_period }}?
+          {% else %}
+            What happened in the {{ time_period }}?
+          {% endif %}
+        question_type: "custom_query"
     - service: logbook_expose.log_query
       data:
         question: "{{ query }}"
         question_type: "{{ question_type }}"
-        area_id: "{{ area_id }}"
         time_period: "{{ time_period }}"
-        entity_id: ""
+        area: "{{ area }}"
+        entity: "{{ device }}"
         domain: ""
         device_class: ""
         state: ""
+        start_time: "{{ start_time }}"
+        end_time: "{{ end_time }}"
   speech:
-    text: "The log query result: {{ state_attr('logbook_expose.last_result', 'logbook') if state_attr('logbook_expose.last_result', 'logbook') else 'no events found.' }}"
-```
+    text: "The log query result:\n{{ state_attr('logbook_expose.last_result', 'logbook') if state_attr('logbook_expose.last_result', 'logbook') else 'no events found.' }}"
+
+### AI Agent Prompt
+To use the `LBEQueryLogbook` intent effectively, include the following parameters in the AI agent prompt:
+
+#### LBEQueryLogbook Parameters:
+- **time_period**: The time period to query (e.g., `last 1 hour`, `today`, `yesterday`, `last 5 minutes`, `last 3 hours`, `2 days ago`). Optional if `start_time` and `end_time` are filled.
+- **device**: The name of the device to filter events by.
+- **area**: The name of the area to filter events by.
+- **start_time**: Explicit start time for the query (format: `YYYY-MM-DD HH:MM:SS`). Optional if `time_period` is filled.
+- **end_time**: Explicit end time for the query (format: `YYYY-MM-DD HH:MM:SS`). Optional if `time_period` is filled.
 
 ## Supported Time Periods
 The following time periods are supported:
 - `today`
 - `yesterday`
-- `last_hour`
-- `last_3_hours`
-- `last_5_hours`
-- `last_8_hours`
-- `last_12_hours`
-- `last_24h`
-- `last_1_minutes`
-- `last_5_minutes`
-- `last_10_minutes`
-- `last_15_minutes`
-- `last_30_minutes`
+- `last 1 hour` (default)
+- any time period like `last x minutes`, `last x hours`, `x days ago`
 
 ## Custom Scripts Directory
 To use custom intent scripts with the Logbook Expose integration, you need to create a directory named `custom_scripts` in your Home Assistant configuration folder. This folder will store any additional or user-defined intent scripts.

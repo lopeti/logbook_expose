@@ -40,16 +40,60 @@ async def map_device_classes(hass):
 
     return device_class_map
 
-async def log_query(hass, ha_token, question, question_type, area_name_or_alias=None, time_period=None, entity_id=None, domain=None, device_class=None, state=None, char_limit=None):
-    _LOGGER.debug("log_query called with parameters: question=%s, question_type=%s, area_name_or_alias=%s, time_period=%s, entity_id=%s, domain=%s, device_class=%s, state=%s",
-                  question, question_type, area_name_or_alias, time_period, entity_id, domain, device_class, state)
+def calculate_time_range(time_period, now, start_time_str=None, end_time_str=None):
+    """Calculate the time range based on the provided time_period, start_time, and end_time."""
+    time_units = {
+        "minutes": lambda x: timedelta(minutes=x),
+        "hours": lambda x: timedelta(hours=x),
+        "days": lambda x: timedelta(days=x),
+    }
 
-    # Ensure only valid time_period values are handled
-    from .const import TIME_PERIODS
+    if start_time_str and end_time_str:
+        try:
+            start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            end_time = datetime.strptime(end_time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            return start_time, end_time
+        except ValueError as e:
+            _LOGGER.error("Invalid start_time or end_time format: %s", e)
+            return None, None
+    elif time_period == "today":
+        start_time = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_time = now
+    elif time_period == "yesterday":
+        start_time = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        end_time = start_time + timedelta(days=1)
+    elif time_period.endswith("days ago"):
+        try:
+            value = int(time_period.split(" ")[0])
+            start_time = (now - timedelta(days=value)).replace(hour=0, minute=0, second=0, microsecond=0)
+            end_time = start_time + timedelta(days=1)
+        except ValueError:
+            _LOGGER.error("Invalid time_period value: %s", time_period)
+            return None, None
+    elif time_period.startswith("last "):
+        for unit, delta_func in time_units.items():
+            if unit in time_period or unit[:-1] in time_period:  # Handle singular/plural
+                try:
+                    value = int(re.search(r'\d+', time_period).group())
+                    start_time = now - delta_func(value)
+                    end_time = now
+                    break  # Exit loop after successful parsing
+                except ValueError:
+                    _LOGGER.error("Invalid time_period value: %s", time_period)
+                    return None, None
+        else:
+            _LOGGER.error("Invalid time_period value: %s", time_period)
+            return None, None
+    else:
+        start_time = now - timedelta(minutes=60)  # Default: last 60 minutes
+        end_time = now
 
-    if time_period not in TIME_PERIODS:
-        _LOGGER.error("Invalid time_period value: %s", time_period)
-        return [f"Error: Invalid time_period value: {time_period}"]
+    return start_time, end_time
+
+async def log_query(hass, ha_token, question, question_type, area_name_or_alias=None, time_period=None, entity_id=None, domain=None, device_class=None, state=None, char_limit=None, start_time=None, end_time=None):
+    _LOGGER.debug("log_query called with parameters: question=%s, question_type=%s, area_name_or_alias=%s, time_period=%s, entity_id=%s, domain=%s, device_class=%s, state=%s, start_time=%s, end_time=%s",
+                  question, question_type, area_name_or_alias, time_period, entity_id, domain, device_class, state, start_time, end_time)
+
 
     # Retrieve home_assistant_url from Home Assistant configuration
     home_assistant_url = hass.config.internal_url or hass.config.external_url
@@ -143,6 +187,9 @@ async def log_query(hass, ha_token, question, question_type, area_name_or_alias=
         area_names_or_aliases = [name.strip().lower() for name in area_name_or_alias.split(',')]
         _LOGGER.debug("Filtering for multiple areas (names or aliases): %s", area_names_or_aliases)
 
+        # Log available area names and aliases for debugging
+        _LOGGER.debug("Available area_name_to_id: %s", area_name_to_id)
+
         # Map area names or aliases to area IDs using area_name_to_id
         for area in area_names_or_aliases:
             if area in area_name_to_id:
@@ -151,6 +198,8 @@ async def log_query(hass, ha_token, question, question_type, area_name_or_alias=
                 _LOGGER.debug("Resolved '%s' to area_id '%s'", area, resolved_area_id)
             else:
                 _LOGGER.warning("Area name or alias '%s' could not be resolved to an area ID.", area)
+                # Log more details about why the area is not found
+                _LOGGER.warning("Area '%s' not found in area_name_to_id. Available keys: %s", area, area_name_to_id.keys())
 
         _LOGGER.debug("Final resolved area IDs for filtering: %s", area_ids)
 
@@ -158,39 +207,16 @@ async def log_query(hass, ha_token, question, question_type, area_name_or_alias=
     now = datetime.now(timezone.utc)
     _LOGGER.debug("Current UTC time: %s", now)
 
-    if time_period == "today":
-        start_time = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    elif time_period == "yesterday":
-        start_time = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        end_time = start_time + timedelta(days=1)
-    elif time_period == "last_hour":
-        start_time = now - timedelta(hours=1)
-    elif time_period == "last_3_hours":
-        start_time = now - timedelta(hours=3)
-    elif time_period == "last_5_hours":
-        start_time = now - timedelta(hours=5)
-    elif time_period == "last_8_hours":
-        start_time = now - timedelta(hours=8)
-    elif time_period == "last_12_hours":
-        start_time = now - timedelta(hours=12)
-    elif time_period == "last_24h":
-        start_time = now - timedelta(hours=24)
-    elif time_period.startswith("last_") and time_period.endswith("_minutes"):
-        try:
-            minutes = int(time_period.split("_")[1])
-            start_time = now - timedelta(minutes=minutes)
-        except ValueError:
-            _LOGGER.error("Invalid time_period value: %s", time_period)
-            return [f"Error: Invalid time_period value: {time_period}"]
-    else:
-        start_time = now - timedelta(minutes=60)  # Alapértelmezett: utolsó 60 perc
-    end_time = now
+    start_time_dt, end_time_dt = calculate_time_range(time_period, now, start_time, end_time)
 
-    _LOGGER.debug("Calculated time range: start_time=%s, end_time=%s", start_time, end_time)
+    if start_time_dt is None or end_time_dt is None:
+        return [f"Error: Invalid time_period value: {time_period} or invalid start_time/end_time format"]
+
+    _LOGGER.debug("Calculated time range: start_time=%s, end_time=%s", start_time_dt, end_time_dt)
 
     # Időformátumok
-    start_time_str = start_time.strftime("%Y-%m-%dT%H:%M:%SZ")
-    end_time_str = end_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+    start_time_str = start_time_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    end_time_str = end_time_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     _LOGGER.debug("Formatted time range: start_time_str=%s, end_time_str=%s", start_time_str, end_time_str)
 
     # API hívás
@@ -352,10 +378,10 @@ async def log_query(hass, ha_token, question, question_type, area_name_or_alias=
             "device_class": device_class_value,
             "event_description": generate_event_description(device_class_value, entry_state)
         }
-        # skip empty device_class
-        if current_event["device_class"] == "" or current_event["device_class"] == "firmware":
-            device_class_filtered += 1
-            continue
+        # # skip empty device_class
+        # if current_event["device_class"] == "" or current_event["device_class"] == "firmware":
+        #     device_class_filtered += 1
+        #     continue
 
         # skip unknown states
         if current_event["state"] == "unknown":
