@@ -9,7 +9,7 @@ from homeassistant.helpers import intent
 
 # Import dependencies from the local directory
 from .log_query import log_query
-from .const import DOMAIN, TIME_PERIODS
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -20,15 +20,11 @@ response_dir = os.path.join(script_dir, "response")
 os.makedirs(log_dir, exist_ok=True)
 os.makedirs(response_dir, exist_ok=True)
 
-async def run_log_query(hass, ha_token, question, question_type, area_id, time_period, entity_id, domain, device_class, state, char_limit):
+async def run_log_query(hass, ha_token, question, question_type, area, time_period, entity, domain, device_class, state, char_limit, start_time, end_time):
     """Run the log_query logic and return the result."""
-    # Replace hardcoded valid_time_periods with TIME_PERIODS from const.py
-    if time_period not in TIME_PERIODS:
-        _LOGGER.error("Invalid time_period value: %s", time_period)
-        return "Error: Invalid time_period value."
 
     try:
-        result = await log_query(hass, ha_token, question, question_type, area_id, time_period, entity_id, domain, device_class, state, char_limit)
+        result = await log_query(hass, ha_token, question, question_type, area, time_period, entity, domain, device_class, state, char_limit, start_time, end_time)
         return result
     except Exception as e:
         _LOGGER.error("Error running log_query logic: %s", e)
@@ -70,8 +66,10 @@ async def async_setup(hass: HomeAssistant, config: dict):
         domain = call.data.get("domain", "")
         device_class = call.data.get("device_class", "")
         state = call.data.get("state", "")
+        start_time = call.data.get("start_time", "")
+        end_time = call.data.get("end_time", "")
 
-        result = await run_log_query(hass, ha_token, question, question_type, area_id, time_period, entity_id, domain, device_class, state, config.get("char_limit", 262144))
+        result = await run_log_query(hass, ha_token, question, question_type, area_id, time_period, entity_id, domain, device_class, state, config.get("char_limit", 262144), start_time, end_time)
         hass.states.async_set(
             "logbook_expose.last_result",
             "ok",  # Set a short state value
@@ -85,6 +83,8 @@ async def async_setup(hass: HomeAssistant, config: dict):
                 "device_class": device_class,
                 "state": state,
                 "logbook": result,  # Store the log result in attributes
+                "start_time": start_time,
+                "end_time": end_time,
             }
         )
 
@@ -109,27 +109,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         """Handle the log_query service call."""
         question = call.data.get("question", "")
         question_type = call.data.get("question_type", "all_events_now")
-        area_id = call.data.get("area_id", "")
-        time_period = call.data.get("time_period", "now")
-        entity_id = call.data.get("entity_id", "")
+        area = call.data.get("area", "")
+        time_period = call.data.get("time_period")
+        entity = call.data.get("entity", "")
         domain = call.data.get("domain", "")
         device_class = call.data.get("device_class", "")
         state = call.data.get("state", "")
+        start_time = call.data.get("start_time", "")
+        end_time = call.data.get("end_time", "")
 
-        result = await run_log_query(hass, entry.data.get("ha_token"), question, question_type, area_id, time_period, entity_id, domain, device_class, state, entry.options.get("char_limit", 262144))
+        result = await run_log_query(hass, entry.data.get("ha_token"), question, question_type, area, time_period, entity, domain, device_class, state, entry.options.get("char_limit", 262144), start_time, end_time)
         hass.states.async_set(
             "logbook_expose.last_result",
             "ok",  # Set a short state value
             {
                 "question": question,
                 "question_type": question_type,
-                "area_id": area_id,
+                "area": area,
                 "time_period": time_period,
-                "entity_id": entity_id,
+                "start_time": start_time,
+                "end_time": end_time,
+                "entity_id": entity,
                 "domain": domain,
                 "device_class": device_class,
                 "state": state,
                 "logbook": result,  # Store the log result in attributes
+                "start_time": start_time,
+                "end_time": end_time,
             }
         )
 
