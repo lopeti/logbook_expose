@@ -60,25 +60,25 @@ async def async_setup(hass: HomeAssistant, config: dict):
         """Handle the log_query service call."""
         question = call.data.get("question", "")
         question_type = call.data.get("question_type", "all_events_now")
-        area_id = call.data.get("area_id", "")
+        area = call.data.get("area", "")
         time_period = call.data.get("time_period", "now")
-        entity_id = call.data.get("entity_id", "")
+        entity = call.data.get("entity", "")
         domain = call.data.get("domain", "")
         device_class = call.data.get("device_class", "")
         state = call.data.get("state", "")
         start_time = call.data.get("start_time", "")
         end_time = call.data.get("end_time", "")
 
-        result = await run_log_query(hass, ha_token, question, question_type, area_id, time_period, entity_id, domain, device_class, state, config.get("char_limit", 262144), start_time, end_time)
+        result = await run_log_query(hass, ha_token, question, question_type, area, time_period, entity, domain, device_class, state, config.get("char_limit", 262144), start_time, end_time)
         hass.states.async_set(
             "logbook_expose.last_result",
             "ok",  # Set a short state value
             {
                 "question": question,
                 "question_type": question_type,
-                "area_id": area_id,
+                "area": area,
                 "time_period": time_period,
-                "entity_id": entity_id,
+                "entity": entity,
                 "domain": domain,
                 "device_class": device_class,
                 "state": state,
@@ -129,7 +129,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 "time_period": time_period,
                 "start_time": start_time,
                 "end_time": end_time,
-                "entity_id": entity,
+                "entity": entity,
                 "domain": domain,
                 "device_class": device_class,
                 "state": state,

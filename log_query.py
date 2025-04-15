@@ -5,6 +5,7 @@ import pytz
 import re
 import os
 import asyncio
+import unicodedata
 
 # Import the format_events function
 from .event_formatter import format_events
@@ -20,6 +21,18 @@ os.makedirs(response_dir, exist_ok=True)
 
 # Initialize Budapest timezone outside of async functions
 BUDAPEST_TZ = pytz.timezone("Europe/Budapest")
+
+# Function to normalize text (remove accents and convert to lowercase)
+def normalize_text(text):
+    """Normalize text by removing accents and converting to lowercase."""
+    if not text:
+        return ""
+    # Normalize to NFD form which separates base characters from diacritics
+    normalized = unicodedata.normalize('NFD', text)
+    # Filter out diacritic marks (category Mn: Mark, Nonspacing)
+    normalized = ''.join([c for c in normalized if not unicodedata.category(c) == 'Mn'])
+    # Convert to lowercase
+    return normalized.lower()
 
 async def log_to_file(filename, content):
     """Helper function to log content to a file."""
@@ -171,37 +184,39 @@ async def log_query(hass, ha_token, question, question_type, area_name_or_alias=
     if isinstance(area_mappings, list):
         for area_item in area_mappings:
             if isinstance(area_item, dict) and "area_id" in area_item and "name" in area_item:
-                area_id_to_name[area_item["area_id"]] = area_item["name"].lower()
+                area_id_to_name[area_item["area_id"]] = normalize_text(area_item["name"])
+                # Also add the original name as an alias
+                area_alias_to_id[normalize_text(area_item["name"])] = area_item["area_id"]
                 for alias in area_item.get("aliases", []):
-                    area_alias_to_id[alias.lower()] = area_item["area_id"]
+                    area_alias_to_id[normalize_text(alias)] = area_item["area_id"]
     else:
         _LOGGER.warning("Unexpected format for area mappings: %s", type(area_mappings))
 
     # Combine area names and aliases into a single lookup
     area_name_to_id = {**area_id_to_name, **area_alias_to_id}
+    _LOGGER.debug("Created area_name_to_id mapping: %s", area_name_to_id)
 
     # Convert area_name_or_alias to a list of area IDs
     area_ids = set()
     if area_name_or_alias:
-        # Split area_name_or_alias by commas and normalize to lowercase
-        area_names_or_aliases = [name.strip().lower() for name in area_name_or_alias.split(',')]
-        _LOGGER.debug("Filtering for multiple areas (names or aliases): %s", area_names_or_aliases)
+        # Split area_name_or_alias by commas and normalize text (remove accents and convert to lowercase)
+        area_names_or_aliases = [normalize_text(name.strip()) for name in area_name_or_alias.split(',')]
+        _LOGGER.debug("Filtering for multiple areas (normalized names or aliases): %s", area_names_or_aliases)
 
         # Log available area names and aliases for debugging
-        _LOGGER.debug("Available area_name_to_id: %s", area_name_to_id)
+        _LOGGER.debug("Available normalized area_name_to_id keys: %s", list(area_name_to_id.keys()))
 
         # Map area names or aliases to area IDs using area_name_to_id
         for area in area_names_or_aliases:
+            _LOGGER.debug("Trying to resolve normalized area name: '%s'", area)
             if area in area_name_to_id:
                 resolved_area_id = area_name_to_id[area]
                 area_ids.add(resolved_area_id)
-                _LOGGER.debug("Resolved '%s' to area_id '%s'", area, resolved_area_id)
+                _LOGGER.debug("✓ Successfully resolved '%s' to area_id '%s'", area, resolved_area_id)
             else:
-                _LOGGER.warning("Area name or alias '%s' could not be resolved to an area ID.", area)
+                _LOGGER.warning("Normalized area name or alias '%s' could not be resolved to an area ID.", area)
                 # Log more details about why the area is not found
-                _LOGGER.warning("Area '%s' not found in area_name_to_id. Available keys: %s", area, area_name_to_id.keys())
-
-        _LOGGER.debug("Final resolved area IDs for filtering: %s", area_ids)
+                _LOGGER.warning("Area '%s' not found in area_name_to_id. Available keys: %s", area, list(area_name_to_id.keys()))
 
     # Időintervallum kiszámítása
     now = datetime.now(timezone.utc)
@@ -254,9 +269,6 @@ async def log_query(hass, ha_token, question, question_type, area_name_or_alias=
         _LOGGER.error("Error during API call: %s", e)
         return [f"Hiba a logok lekérdezése során: {e}"]
 
-    # Define ignored entities list
-    ignored_entities = ["sensor.date_time"]
-
     # Prepare structured events for formatting
     structured_events = []
     last_event = None
@@ -277,22 +289,19 @@ async def log_query(hass, ha_token, question, question_type, area_name_or_alias=
             if entity_entry:
                 expose_option = entity_entry.options.get("conversation", {}).get("should_expose", False)
                 if not expose_option:
-                    _LOGGER.debug("Skipping entity '%s' because conversation expose option is not True", entry_entity_id)
+                    #_LOGGER.debug("Skipping entity '%s' because conversation expose option is not True", entry_entity_id)
                     ignore_filtered += 1
                     continue
             else:
                 _LOGGER.debug("Entity '%s' not found in entity_registry", entry_entity_id)
+                ignore_filtered += 1
+                continue
         else:
             _LOGGER.warning("Entity registry not available in hass.data")
-            
-# binary_sensor.bejarat_motion_detected - if we detected this device, just take a log from it
-        if entry_entity_id == "binary_sensor.bejarat_motion_detected":
-            _LOGGER.debug("Found entry for binary_sensor.bejarat_motion_detected, using its state")
-
-        # Skip ignored entities
-        if entry_entity_id in ignored_entities:
             ignore_filtered += 1
             continue
+            
+
 
         # Időbélyeg konvertálása helyi időre
         try:
@@ -348,7 +357,7 @@ async def log_query(hass, ha_token, question, question_type, area_name_or_alias=
         device_class_value = entry.get("attributes", {}).get("device_class", "")
         if not device_class_value and entry_entity_id in device_class_mappings:
             device_class_value = device_class_mappings[entry_entity_id]
-            _LOGGER.debug("Found device_class '%s' for entity %s in device_class_mappings", device_class_value, entry_entity_id)
+            #_LOGGER.debug("Found device_class '%s' for entity %s in device_class_mappings", device_class_value, entry_entity_id)
 
         # Fetch friendly name from various sources
         friendly_name = None
@@ -367,7 +376,7 @@ async def log_query(hass, ha_token, question, question_type, area_name_or_alias=
             else:
                 friendly_name = entry_entity_id
         
-        _LOGGER.debug("Entity: %s, Friendly name: %s", entry_entity_id, friendly_name)
+        #_LOGGER.debug("Entity: %s, Friendly name: %s", entry_entity_id, friendly_name)
 
         # Create a structured event dictionary with friendly name
         current_event = {
@@ -389,7 +398,7 @@ async def log_query(hass, ha_token, question, question_type, area_name_or_alias=
             continue
         # Filter duplicate events (same second-level timestamp)
         if last_event and last_event["timestamp"][:19] == current_event["timestamp"][:19]:
-            _LOGGER.debug("Skipping duplicate event with timestamp: %s", current_event["timestamp"][:19])
+            #_LOGGER.debug("Skipping duplicate event with timestamp: %s", current_event["timestamp"][:19])
             continue
 
 

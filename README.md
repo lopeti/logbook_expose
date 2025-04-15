@@ -150,6 +150,8 @@ LBEQueryLogbook:
   speech:
     text: "The log query result:\n{{ state_attr('logbook_expose.last_result', 'logbook') if state_attr('logbook_expose.last_result', 'logbook') else 'no events found.' }}"
 
+
+
 ### AI Agent Prompt
 To use the `LBEQueryLogbook` intent effectively, include the following parameters in the AI agent prompt:
 
