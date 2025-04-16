@@ -1,69 +1,71 @@
 LBEQueryLogbook:
-  description: |
-    Queries the Home Assistant logbook and returns events based on specified criteria.
-    This intent allows users to ask questions about events related to devices, areas, or general activity within a specified time period.
-    The response provides a summary of the log events, including timestamps, entities, and event descriptions.
+  description: >
+    Lekérdezi a Home Assistant naplóeseményeit az adott paraméterek alapján.
+    A lekérdezésben szerepelhet terület, entitás, időszak, állapot, domain, vagy eszköztípus (device_class).
+    A válasz egy formázott lista az eseményekről (idő, entitás, esemény).
 
-    Example questions:
-      - "What happened in the living room in the last hour?"
-      - "What happened with the kitchen light today?"
-      - "What happened in the last 5 minutes?"
-      - "What happened between 2024-01-01 00:00:00 and 2024-01-02 00:00:00?"
-      - "Tell me about the events in the last 3 hours."
-      - "What happened with the thermostat yesterday?"
-      - "What happened in the bedroom 2 days ago?"
-      - "How many times did the doorbell ring in the last hour?"
-      - "Since when has the entrance door been open?"
-      - "What is the total duration of the terrace door being open in the last hour?"
-      - "List all the bath usage events in the last 3 hours with timestamps and durations."
-      You can use multiple calls to the logbook_expose.log_query service to comparing different time periods or devices.
-      - "Did you see more animals in the garden tonight or last night?
+  fields:
+    time_period:
+      description: Az időintervallum megnevezése (pl. last 1 hour, yesterday)
+      example: last 3 hours
+    start_time:
+      description: Kezdő időpont (YYYY-MM-DD HH:MM:SS)
+    end_time:
+      description: Záró időpont (YYYY-MM-DD HH:MM:SS)
+    area:
+      description: Terület neve (pl. nappali, konyha, kert)
+    entity:
+      description: Entitás neve (pl. bejárati kamera, konyhai mozgásérzékelő)
+    domain:
+      description: Entitás domain-je (pl. light, binary_sensor, switch)
+    device_class:
+      description: Eszköz típusa (pl. motion, door, presence)
+    state:
+      description: Szűrni kívánt állapot (pl. on, off, locked)
 
-    Parameters:
-      - time_period: The time period to query (e.g., last 1 hour, today, yesterday, last 5 minutes, last 3 hours, 2 days ago). Defaults to last_hour if not provided.
-      - device: The name of the device to filter events by.
-      - area: The name of the area to filter events by.
-      - start_time: Explicit start time for the query (format: YYYY-MM-DD HH:MM:SS). Optional.
-      - end_time: Explicit end time for the query (format: YYYY-MM-DD HH:MM:SS). Optional.
+  slots:
+    time_period:
+    start_time:
+    end_time:
+    area:
+    entity:
+    domain:
+    device_class:
+    state:
 
-    Response:
-      Returns a plain text summary of log events matching the specified criteria.
-      Sample response:
-        "The log query result:\n- 2024-01-01 12:00:00: Living room light turned on\n- 2024-01-01 12:05:00: Living room light turned off"
-      If no events are found, returns a message indicating that no events were found.
-      You can use the `logbook_expose.last_result` entity to access the raw logbook data for further processing or display.      
   action:
     - variables:
         time_period: "{{ time_period | default('last 1 hour') }}"
-        device: "{{ device | default('') }}"
-        area: "{{ area | default('') }}"
         start_time: "{{ start_time | default('') }}"
         end_time: "{{ end_time | default('') }}"
+        area: "{{ area | default('') }}"
+        entity: "{{ entity | default('') }}"
+        domain: "{{ domain | default('') }}"
+        device_class: "{{ device_class | default('') }}"
+        state: "{{ state | default('') }}"
         query: >
           {% if start_time and end_time %}
             What happened between {{ start_time }} and {{ end_time }}?
-          {% elif device and area %}
-            What happened with the {{ device }} device in the {{ area }} area in the {{ time_period }}?
-          {% elif device %}
-            What happened with the {{ device }} device in the {{ time_period }}?
+          {% elif entity and area %}
+            What happened with the {{ entity }} in the {{ area }} in the {{ time_period }}?
+          {% elif entity %}
+            What happened with the {{ entity }} in the {{ time_period }}?
           {% elif area %}
-            What happened in the {{ area }} area in the {{ time_period }}?
+            What happened in the {{ area }} in the {{ time_period }}?
           {% else %}
             What happened in the {{ time_period }}?
           {% endif %}
         question_type: "custom_query"
+
     - service: logbook_expose.log_query
       data:
         question: "{{ query }}"
         question_type: "{{ question_type }}"
         time_period: "{{ time_period }}"
-        area: "{{ area }}"
-        entity: "{{ device }}"
-        domain: ""
-        device_class: ""
-        state: ""
         start_time: "{{ start_time }}"
         end_time: "{{ end_time }}"
-  speech:
-    text: "The log query result:\n{{ state_attr('logbook_expose.last_result', 'logbook') if state_attr('logbook_expose.last_result', 'logbook') else 'no events found.' }}"
-
+        area: "{{ area }}"
+        entity: "{{ entity }}"
+        domain: "{{ domain }}"
+        device_class: "{{ device_class }}"
+        state: "{{ state }}"

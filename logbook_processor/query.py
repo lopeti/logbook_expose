@@ -63,10 +63,8 @@ def calculate_time_range(time_period, now, start_time_str=None, end_time_str=Non
 
     if start_time_str and end_time_str:
         try:
-            local_start = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=LOCAL_TZ)
-            start_time = local_start.astimezone(timezone.utc)
-            local_end = datetime.strptime(end_time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=LOCAL_TZ)
-            end_time = local_end.astimezone(timezone.utc)
+            start_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            end_time = datetime.strptime(end_time_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
             return start_time, end_time
         except ValueError as e:
             _LOGGER.error("Invalid start_time or end_time format: %s", e)
@@ -220,7 +218,7 @@ async def log_query(hass, ha_token, question, question_type, area_name_or_alias=
                 # Log more details about why the area is not found
                 _LOGGER.warning("Area '%s' not found in area_name_to_id. Available keys: %s", area, list(area_name_to_id.keys()))
 
-    # Calculate time range
+    # Időintervallum kiszámítása
     now = datetime.now(timezone.utc)
     _LOGGER.debug("Current UTC time: %s", now)
 
@@ -231,12 +229,12 @@ async def log_query(hass, ha_token, question, question_type, area_name_or_alias=
 
     _LOGGER.debug("Calculated time range: start_time=%s, end_time=%s", start_time_dt, end_time_dt)
 
-    # Format time range for API
+    # Időformátumok
     start_time_str = start_time_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     end_time_str = end_time_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     _LOGGER.debug("Formatted time range: start_time_str=%s, end_time_str=%s", start_time_str, end_time_str)
 
-    # API call
+    # API hívás
     params = {"end_time": end_time_str}
     if entity_id:
         params["entity_id"] = entity_id
@@ -303,19 +301,12 @@ async def log_query(hass, ha_token, question, question_type, area_name_or_alias=
             ignore_filtered += 1
             continue
             
-        # Filter by time range
-        try:
-            utc_time = datetime.fromisoformat(entry_when.replace("Z", "+00:00"))
-            if not (start_time_dt <= utc_time <= end_time_dt):
-                continue
-        except ValueError:
-            _LOGGER.warning("Invalid timestamp format: %s", entry_when)
-            continue
+
 
         # Időbélyeg konvertálása helyi időre
         try:
             utc_time = datetime.fromisoformat(entry_when.replace("Z", "+00:00"))
-            local_time = utc_time.astimezone(LOCAL_TZ)
+            local_time = utc_time.astimezone(BUDAPEST_TZ)
             formatted_time = local_time.strftime("%Y-%m-%d %H:%M:%S")
         except ValueError:
             _LOGGER.warning("Invalid timestamp format: %s", entry_when)
