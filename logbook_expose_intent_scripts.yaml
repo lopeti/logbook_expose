@@ -69,3 +69,5 @@ LBEQueryLogbook:
         domain: "{{ domain }}"
         device_class: "{{ device_class }}"
         state: "{{ state }}"
+  speech:
+    text: "The log query result:\n{{ state_attr('logbook_expose.last_result', 'logbook') if state_attr('logbook_expose.last_result', 'logbook') else 'no events found.' }}"

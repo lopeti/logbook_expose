@@ -295,7 +295,7 @@ async def log_query(hass, ha_token, question, question_type, area_name_or_alias=
                     ignore_filtered += 1
                     continue
             else:
-                _LOGGER.debug("Entity '%s' not found in entity_registry", entry_entity_id)
+                #_LOGGER.debug("Entity '%s' not found in entity_registry", entry_entity_id)
                 ignore_filtered += 1
                 continue
         else:
@@ -336,16 +336,34 @@ async def log_query(hass, ha_token, question, question_type, area_name_or_alias=
                         if device_entry:
                             actual_area_id = device_entry.area_id
                             #_LOGGER.debug("Fetched area_id '%s' from device_registry for entity '%s'", actual_area_id, entry_entity_id)
-                else:
-                    _LOGGER.debug("Entity '%s' not found in entity_registry", entry_entity_id)
-            else:
-                _LOGGER.warning("Entity registry not available in hass.data")
+                #else:
+                    #_LOGGER.debug("Entity '%s' not found in entity_registry", entry_entity_id)
+           # else:
+                #_LOGGER.warning("Entity registry not available in hass.data")
 
             # Check if the actual area_id matches any of the resolved area IDs
             if actual_area_id and actual_area_id in area_ids:
                 _LOGGER.debug("Entity '%s' matches area_id '%s'", entry_entity_id, actual_area_id)
             else:
-                #_LOGGER.debug("Entity '%s' with actual_area_id '%s' does not match any area_id in %s", entry_entity_id, actual_area_id, area_ids)
+                # Get area names for logging
+                actual_area_name = "None"
+                if actual_area_id:
+                    for area_item in area_mappings:
+                        if area_item["area_id"] == actual_area_id:
+                            actual_area_name = area_item["name"]
+                            break
+                
+                # Get requested area names
+                requested_area_names = []
+                for area_id in area_ids:
+                    for area_item in area_mappings:
+                        if area_item["area_id"] == area_id:
+                            requested_area_names.append(area_item["name"])
+                            break
+                
+                _LOGGER.info("Area filter: '%s' (%s) != %s: entity '%s' filtered out", 
+                            actual_area_name, actual_area_id, 
+                            requested_area_names, entry_entity_id)
                 area_filtered += 1
                 continue
 
