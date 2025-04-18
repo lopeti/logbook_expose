@@ -1,0 +1,14 @@
+# custom_components/your_integration/sentences/hu.yaml
+
+- sentence: "Mi történt a {{ time_period }} alatt a {{ area }} területen?"
+  intent:
+    name: LBEQueryLogbook
+    slots:
+      time_period: "{{ time_period }}"
+      area: "{{ area }}"
+
+- sentence: "Mutasd meg a naplóeseményeket {{ time_period }} időszakból"
+  intent:
+    name: LBEQueryLogbook
+    slots:
+      time_period: "{{ time_period }}"
