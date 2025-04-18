@@ -52,7 +52,7 @@ class LBEQueryLogbookHandler(IntentHandler):
                 "area": area,
                 "entity": entity,
                 "domain": domain,
-                "device_classes": device_class,
+                "device_class": device_class,
                 "state": state,
             },
             blocking=True,
