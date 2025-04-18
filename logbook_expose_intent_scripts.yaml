@@ -1,7 +1,7 @@
 LBEQueryLogbook:
   description: >
     Lekérdezi a Home Assistant naplóeseményeit az adott paraméterek alapján.
-    A lekérdezésben szerepelhet terület, entitás, időszak, állapot, domain, vagy eszköztípus (device_class).
+    A lekérdezésben szerepelhet terület, entitás, időszak, állapot, domain, vagy eszköztípus (device_classes).
     A válasz egy formázott lista az eseményekről (idő, entitás, esemény).
 
   fields:
@@ -18,7 +18,7 @@ LBEQueryLogbook:
       description: Entitás neve (pl. bejárati kamera, konyhai mozgásérzékelő)
     domain:
       description: Entitás domain-je (pl. light, binary_sensor, switch)
-    device_class:
+    device_classes:
       description: Eszköz típusa (pl. motion, door, presence)
     state:
       description: Szűrni kívánt állapot (pl. on, off, locked)
@@ -41,7 +41,7 @@ LBEQueryLogbook:
         area: "{{ area | default('') }}"
         entity: "{{ entity | default('') }}"
         domain: "{{ domain | default('') }}"
-        device_class: "{{ device_class | default('') }}"
+        device_classes: "{{ device_class | default('') }}"
         state: "{{ state | default('') }}"
         query: >
           {% if start_time and end_time %}
@@ -67,7 +67,7 @@ LBEQueryLogbook:
         area: "{{ area }}"
         entity: "{{ entity }}"
         domain: "{{ domain }}"
-        device_class: "{{ device_class }}"
+        device_classes: "{{ device_class }}"
         state: "{{ state }}"
   speech:
     text: "The log query result:\n{{ state_attr('logbook_expose.last_result', 'logbook') if state_attr('logbook_expose.last_result', 'logbook') else 'no events found.' }}"

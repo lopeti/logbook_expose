@@ -9,35 +9,6 @@ _LOGGER = logging.getLogger(__name__)
 # Determine local timezone dynamically from system
 LOCAL_TZ = datetime.now().astimezone().tzinfo
 
-# --- Entity Resolution ---
-def resolve_entity_id_in_area(hass, user_entity_name, area_ids, domain=None, device_class=None):
-    user_norm = normalize_text(user_entity_name)
-    entity_registry = hass.data.get("entity_registry")
-    if not entity_registry:
-        _LOGGER.warning("Entity registry not available")
-        return None
-
-    for entity in entity_registry.entities.values():
-        if area_ids and entity.area_id not in area_ids:
-            continue
-
-        if domain and not entity.entity_id.startswith(f"{domain}."):
-            continue
-
-        state = hass.states.get(entity.entity_id)
-        if not state:
-            continue
-
-        if device_class:
-            dc = state.attributes.get("device_class")
-            if dc != device_class:
-                continue
-
-        friendly = state.attributes.get("friendly_name", "")
-        if normalize_text(friendly) == user_norm:
-            return entity.entity_id
-
-    return None
 
 # --- Utility Functions ---
 def normalize_text(text):
@@ -194,7 +165,7 @@ def resolve_area_ids(area_mappings, area_name_or_alias):
                 _LOGGER.warning("Area '%s' could not be resolved to an area ID.", name)
 
     # Log the area mappings for debugging
-    _LOGGER.debug("Area mappings: %s", area_mappings)
+    #_LOGGER.debug("Area mappings: %s", area_mappings)
 
     return resolved_ids
 
@@ -230,8 +201,8 @@ def filter_logbook_entries(entries, candidate_entities, state=None, events_per_s
         if candidate_ids and eid not in candidate_ids:
             continue
 
-        if state and est != state:
-            continue
+        #if state and est != state:
+         #   continue
 
         filtered.append(entry)
 
@@ -331,46 +302,112 @@ def inject_resolved_properties(hass, entries, properties):
             # ...future property injections...
     return entries
 
-def gather_candidate_entities(hass, entity_id=None, domain=None, device_class=None, area_ids=None):
-    _LOGGER.debug("Gathering candidate entities with filters: entity_id=%s, domain=%s, device_class=%s, area_ids=%s", entity_id, domain, device_class, area_ids)
+def gather_candidate_entities(hass, entity_name_or_id=None, domain=None, device_classes=None, area_ids=None):
+    _LOGGER.debug("Gathering candidate entities with filters: entity_id=%s, domain=%s, device_classes=%s, area_ids=%s", entity_name_or_id, domain, device_classes, area_ids)
+    _LOGGER.debug("Gathering version:  v1.0.1")
     candidate_entities = []
     entity_registry = hass.data.get("entity_registry")
     device_reg = hass.data.get("device_registry")
     if entity_registry:
+        total_entities = 0
+        filtered_by_expose = 0
+        filtered_by_entity_id = 0
+        filtered_by_domain = 0
+        filtered_by_device_class = 0
+        filtered_by_area = 0
+
         for ent in entity_registry.entities.values():
-            # Ha az entity nem expozálható, akkor skip
+            total_entities += 1
             expose_option = ent.options.get("conversation", {}).get("should_expose", False)
             if not expose_option:
+                filtered_by_expose += 1
                 continue
             state_obj = hass.states.get(ent.entity_id)
-            # NEW: Skip if state_obj is None
             if not state_obj:
                 continue
-            # Ha van konkrét entity_id paraméter (feltehetően friendly name, entity_id vagy alias)
-            if entity_id:
-                norm_input = normalize_text(entity_id)
+            if entity_name_or_id:
+                norm_input = normalize_text(entity_name_or_id)
                 friendly = normalize_text(state_obj.attributes.get("friendly_name", ""))
                 actual = normalize_text(state_obj.entity_id)
                 aliases = ent.options.get("aliases", [])
                 norm_aliases = [normalize_text(a) for a in aliases]
                 if friendly != norm_input and actual != norm_input and norm_input not in norm_aliases:
+                    filtered_by_entity_id += 1
+                    #_LOGGER.debug("Filtered by entity_norm_input: %s, friendly=%s, actual=%s, aliases=%s", norm_input, friendly, actual, norm_aliases)  
+                                  
                     continue
-            # FIX: Ensure domain filter is applied correctly
-            if domain and not any(ent.entity_id.startswith(f"{d}.") for d in domain):
-                continue
+            # Domain filtering
             if domain:
-                #átjutottunk a domain szűrőn, de vajon hogy
-                _LOGGER.debug("Entity %s passed domain filter: %s", ent.entity_id, domain)
-            if device_class and state_obj and state_obj.attributes.get("device_class") != device_class:
+                if isinstance(domain, str):
+                    domain = [domain]
+                if len(domain) > 0 and not any(ent.entity_id.startswith(f"{d}.") for d in domain):
+                    filtered_by_domain += 1
+                    #_LOGGER.debug("Filtered by domain: %s", ent.entity_id)
+                    continue
+            ### Device class filtering
+
+
+            if device_classes:
+                #preload device_class from state object
+                device_class_attr = state_obj.attributes.get("device_class", None)
+                if isinstance(device_class_attr, str):
+                    device_class_attr = [device_class_attr]  # Convert single string to list
+                elif not isinstance(device_class_attr, list):
+                    device_class_attr = []  # Default to empty list if not a string or list
+                
+                # convert device_classes to list if it's a string
+                if isinstance(device_classes, str):
+                    device_classes = [device_classes]             
+
+                if len(device_classes) > 0 and not any(dc in device_classes for dc in device_class_attr):
+                    filtered_by_device_class += 1
+                    _LOGGER.debug("Filtered by device_class: %s", device_class_attr)
+                    continue    
+
+            ent_area_id = ent.area_id
+            if not ent_area_id and device_reg and ent.device_id in device_reg.devices:
+                ent_area_id = device_reg.devices[ent.device_id].area_id
+
+            # Skip entities without an area if area filtering is applied
+            if area_ids and not ent_area_id:
+                filtered_by_area += 1
                 continue
-            # NEW: Check area inheritance via device registry if entity lacks area_id.
-            area_id = ent.area_id
-            if not area_id and device_reg and ent.device_id in device_reg.devices:
-                area_id = device_reg.devices[ent.device_id].area_id
-            # FIX: Ensure area_ids filter is applied correctly
-            if area_ids and (not area_id or area_id not in area_ids):
+
+            if area_ids and not any(ent_area_id == aid for aid in area_ids):
+                filtered_by_area += 1
                 continue
+
+            # Log passed criteria before appending the entity, but only for the first 20 candidates
+
+            passed_criteria = []
+            if entity_name_or_id:
+                passed_criteria.append(f"entity_id={entity_name_or_id}")
+            if domain:
+                passed_criteria.append(f"domain={domain}")
+            if device_classes:
+                passed_criteria.append(f"device_classes={device_classes}")
+            if area_ids:
+                passed_criteria.append(f"area_ids={area_ids}")
+            if expose_option:
+                passed_criteria.append("exposed=True")
+            if state_obj.state:
+                passed_criteria.append(f"state={state_obj.state}")
+
+            _LOGGER.debug(
+                "Entity %s passed criteria: %s", 
+                ent.entity_id, 
+                ", ".join(passed_criteria)
+            )
+
             candidate_entities.append(state_obj)
+
+        _LOGGER.debug("Total entities: %d", total_entities)
+        _LOGGER.debug("Filtered by expose: %d", filtered_by_expose)
+        _LOGGER.debug("Filtered by entity_id: %d", filtered_by_entity_id)
+        _LOGGER.debug("Filtered by domain: %d", filtered_by_domain)
+        _LOGGER.debug("Filtered by device_class: %d", filtered_by_device_class)
+        _LOGGER.debug("Filtered by area: %d", filtered_by_area)
+
     return list({s.entity_id: s for s in candidate_entities}.values())
 
 # --- High-Level Query Runner ---
@@ -400,9 +437,9 @@ async def run_log_query(
     question_type,
     area_name_or_alias=None,
     time_period=None,
-    entity_id=None,
+    entity_name_or_alias=None,
     domain=None,
-    device_class=None,
+    device_classes=None,
     state=None,
     char_limit=262144,
     start_time=None,
@@ -419,32 +456,27 @@ async def run_log_query(
     start_str = start_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
     end_str = end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # Step 2: Get area + entity info
-    # If entity_id is a friendly name, try to resolve it based on area/domain/device_class
-    if entity_id and not entity_id.startswith("sensor.") and not entity_id.startswith("binary_sensor.") and not entity_id.startswith("camera."):
-        resolved = resolve_entity_id_in_area(hass, entity_id, area_ids, domain=domain, device_class=device_class)
-        if resolved:
-            _LOGGER.info("Resolved entity name '%s' to entity_id: %s", entity_id, resolved)
-            entity_id = resolved
-        else:
-            _LOGGER.warning("Could not resolve entity name '%s' in given area/domain/class", entity_id)
     area_mappings = fetch_area_mappings(hass)
 
     area_ids = resolve_area_ids(area_mappings, area_name_or_alias)
-    device_class_map, _ = fetch_entity_mappings(hass)
+    #device_class_map, _ = fetch_entity_mappings(hass)
 
     # Új megközelítés: candidate list feltöltése teljes state objektummal, nem csak entity_id-val
     max_iter = 5
-    candidate_entities = gather_candidate_entities(hass, entity_id, domain, device_class, area_ids)
+    candidate_entities = gather_candidate_entities(hass, entity_name_or_alias, domain, device_classes, area_ids)
     # Deduplicate candidate state objects by entity_id
     candidate_entities = list({s.entity_id: s for s in candidate_entities}.values())
     # Extra debug logging: if extra filters applied, log detailed candidate entity_ids;
     # otherwise, log only the total count.
-    if entity_id or domain or device_class or area_ids:
+    if entity_name_or_alias or domain or device_classes or area_ids:
         _LOGGER.debug("Detailed candidate entities: %s", [s.entity_id for s in candidate_entities])
     else:
         _LOGGER.info("Candidate entities count (only expose filter applied): %d", len(candidate_entities))
     
+    #no candidate entities found
+    if not candidate_entities:
+        _LOGGER.warning("No candidate entities found for the given filters.")
+        return "No entities found for the given filters."
 
     url = f"{hass.config.internal_url or hass.config.external_url}/api/logbook/{start_str}"
     headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
