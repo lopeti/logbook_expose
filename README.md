@@ -1,15 +1,14 @@
 # Logbook Expose Integration
 
-**Note:** This project is in an early stage of development.
-
 ## Overview
-The **Logbook Expose** integration for Home Assistant is designed to provide seamless access to logbook events for conversation agents such as Google AI, ChatGPT, and others. This integration enables querying and analyzing logbook data with extended attributes, offering a flexible way to retrieve and process log information based on specific parameters like time periods, areas, entities, and more. By bridging Home Assistant's logbook with conversational AI, it empowers users to interact with their smart home data in a natural and intuitive way.
+The **Logbook Expose** integration for Home Assistant provides seamless access to logbook events for conversation agents such as Google AI, ChatGPT, and others. This integration enables querying and analyzing logbook data with extended attributes, offering a flexible way to retrieve and process log information based on specific parameters like time periods, areas, entities, and more. By bridging Home Assistant's logbook with conversational AI, it empowers users to interact with their smart home data in a natural and intuitive way.
 
 ## Features
 - Query logbook events using custom time periods (e.g., `today`, `last_3_hours`, `last_5_minutes`).
 - Filter events by area, entity, domain, device class, or state.
 - Supports dynamic configuration through the Home Assistant UI.
 - Provides detailed responses for automation and intent scripts.
+- Automatically sets up intent scripts for natural language queries.
 
 ## Installation
 1. Clone the repository into your Home Assistant `custom_components` directory:
@@ -30,7 +29,6 @@ The **Logbook Expose** integration for Home Assistant is designed to provide sea
 - **ha_token**: The Home Assistant token for API access.
 - **enable_file_logging**: Enable or disable file logging for debugging.
 - **char_limit**: Maximum number of characters allowed in the response text (default: 262,144).
-- **skip_unknown_states**: Skip entities with unknown state values (default: true).
 
 ## Usage
 ### Service: `logbook_expose.log_query`
@@ -75,125 +73,23 @@ data:
   state: ""
 ```
 
-### Intent Scripts
-The integration supports intent scripts for natural language queries. Example intents include:
-- **LBEQueryLogbook**: Query events using a flexible time period, device, and area.
+### Intent Integration
+The integration supports natural language queries through the `LBEQueryLogbook` intent. This allows users to ask questions like "What happened in the kitchen in the last hour?" or "What happened with the living room light today?"
 
-#### Example Intent Script:
-```yaml
-LBEQueryLogbook:
-  description: |
-    Queries the Home Assistant logbook and returns events based on specified criteria.
-    This intent allows users to ask questions about events related to devices, areas, or general activity within a specified time period.
-    The response provides a summary of the log events, including timestamps, entities, and event descriptions.
+#### Intent Slots
+- `question` (string): The text of the question.
+- `area` (string): The area to query (e.g., "kitchen").
+- `time_period` (string): The time period to query (e.g., "last hour").
+- `entity_id` (string): The specific entity to query.
+- `domain` (string): The domain of the entity (e.g., "light").
+- `device_class` (string): The device class of the entity (e.g., "motion").
+- `state` (string): The state of the entity (e.g., "on").
 
-    Example questions:
-      - "What happened in the living room in the last hour?"
-      - "What happened with the kitchen light today?"
-      - "What happened in the last 5 minutes?"
-      - "What happened between 2024-01-01 00:00:00 and 2024-01-02 00:00:00?"
-      - "Tell me about the events in the last 3 hours."
-      - "What happened with the thermostat yesterday?"
-      - "What happened in the bedroom 2 days ago?"
-      - "How many times did the doorbell ring in the last hour?"
-      - "Since when has the entrance door been open?"
-      - "What is the total duration of the terrace door being open in the last hour?"
-      - "List all the bath usage events in the last 3 hours with timestamps and durations."
-      You can use multiple calls to the logbook_expose.log_query service to comparing different time periods or devices.
-      - "Did you see more animals in the garden tonight or last night?
-
-    Parameters:
-      - time_period: The time period to query (e.g., last 1 hour, today, yesterday, last 5 minutes, last 3 hours, 2 days ago). Defaults to last_hour if not provided.
-      - device: The name of the device to filter events by.
-      - area: The name of the area to filter events by.
-      - start_time: Explicit start time for the query (format: YYYY-MM-DD HH:MM:SS). Optional.
-      - end_time: Explicit end time for the query (format: YYYY-MM-DD HH:MM:SS). Optional.
-
-    Response:
-      Returns a plain text summary of log events matching the specified criteria.
-      Sample response:
-        "The log query result:\n- 2024-01-01 12:00:00: Living room light turned on\n- 2024-01-01 12:05:00: Living room light turned off"
-      If no events are found, returns a message indicating that no events were found.
-      You can use the `logbook_expose.last_result` entity to access the raw logbook data for further processing or display.      
-  action:
-    - variables:
-        time_period: "{{ time_period | default('last 1 hour') }}"
-        device: "{{ device | default('') }}"
-        area: "{{ area | default('') }}"
-        start_time: "{{ start_time | default('') }}"
-        end_time: "{{ end_time | default('') }}"
-        query: >
-          {% if start_time and end_time %}
-            What happened between {{ start_time }} and {{ end_time }}?
-          {% elif device and area %}
-            What happened with the {{ device }} device in the {{ area }} area in the {{ time_period }}?
-          {% elif device %}
-            What happened with the {{ device }} device in the {{ time_period }}?
-          {% elif area %}
-            What happened in the {{ area }} area in the {{ time_period }}?
-          {% else %}
-            What happened in the {{ time_period }}?
-          {% endif %}
-        question_type: "custom_query"
-    - service: logbook_expose.log_query
-      data:
-        question: "{{ query }}"
-        question_type: "{{ question_type }}"
-        time_period: "{{ time_period }}"
-        area: "{{ area }}"
-        entity: "{{ device }}"
-        domain: ""
-        device_class: ""
-        state: ""
-        start_time: "{{ start_time }}"
-        end_time: "{{ end_time }}"
-  speech:
-    text: "The log query result:\n{{ state_attr('logbook_expose.last_result', 'logbook') if state_attr('logbook_expose.last_result', 'logbook') else 'no events found.' }}"
-
-
-
-### AI Agent Prompt
-To use the `LBEQueryLogbook` intent effectively, include the following parameters in the AI agent prompt:
-
-#### LBEQueryLogbook Parameters:
-- **time_period**: The time period to query (e.g., `last 1 hour`, `today`, `yesterday`, `last 5 minutes`, `last 3 hours`, `2 days ago`). Optional if `start_time` and `end_time` are filled.
-- **device**: The name of the device to filter events by.
-- **area**: The name of the area to filter events by.
-- **start_time**: Explicit start time for the query (format: `YYYY-MM-DD HH:MM:SS`). Optional if `time_period` is filled.
-- **end_time**: Explicit end time for the query (format: `YYYY-MM-DD HH:MM:SS`). Optional if `time_period` is filled.
-
-## Supported Time Periods
-The following time periods are supported:
-- `today`
-- `yesterday`
-- `last 1 hour` (default)
-- any time period like `last x minutes`, `last x hours`, `x days ago`
-
-## Custom Scripts Directory
-To use custom intent scripts with the Logbook Expose integration, you need to create a directory named `custom_scripts` in your Home Assistant configuration folder. This folder will store any additional or user-defined intent scripts.
-
-Example path:
-```
-/config/custom_scripts
-```
-
-## Built-in Intent Script Copying
-The integration automatically copies the built-in intent script file `logbook_expose_intent_scripts.yaml` to the `intent_scripts` directory in your Home Assistant configuration folder. This ensures that the default intents are always available for use.
-
-The copied file can be found at:
-```
-/config/intent_scripts/logbook_expose_intent_scripts.yaml
-```
-If the file does not exist in the source directory, a warning will be logged.
-
-## Including Intent Scripts in Configuration
-To include the intent scripts in your Home Assistant configuration, add the following to your `configuration.yaml` file:
-
-```yaml
-intent_script: !include_dir_merge_named intent_scripts
-```
-
-This configuration will merge all YAML files in the `intent_scripts` directory and make them available as intent scripts in Home Assistant.
+#### Example Queries:
+- "What happened in the living room in the last hour?"
+- "What happened with the kitchen light today?"
+- "What happened in the last 5 minutes?"
+- "What happened between 2024-01-01 00:00:00 and 2024-01-02 00:00:00?"
 
 ## Debugging
 Enable file logging during setup to log requests and responses for debugging purposes. Logs are stored in the `log` directory within the integration folder.
