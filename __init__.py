@@ -7,10 +7,11 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers import intent
 
-# Import dependencies from the local directory
-from .log_query import log_query
-from .const import DOMAIN
 
+# Import dependencies from the local directory
+from .const import DOMAIN
+#import dependencies from logbook_processor
+from .logbook_processor.query import run_log_query as log_query
 _LOGGER = logging.getLogger(__name__)
 
 # Ensure the log and response directories exist

@@ -184,6 +184,7 @@ def resolve_area_ids(area_mappings, area_name_or_alias):
     resolved_ids = set()
 
     if area_name_or_alias:
+        _LOGGER.debug("Resolving area_name_or_alias: %s", area_name_or_alias)  # Log the input value
         names = [normalize_text(name.strip()) for name in area_name_or_alias.split(",")]
         for name in names:
             resolved_id = area_name_to_id.get(name)
@@ -191,6 +192,9 @@ def resolve_area_ids(area_mappings, area_name_or_alias):
                 resolved_ids.add(resolved_id)
             else:
                 _LOGGER.warning("Area '%s' could not be resolved to an area ID.", name)
+
+    # Log the area mappings for debugging
+    _LOGGER.debug("Area mappings: %s", area_mappings)
 
     return resolved_ids
 
@@ -211,82 +215,66 @@ async def fetch_logbook_data(hass, url, headers, params):
         return []
 
 # --- Logbook Filtering ---
-def filter_logbook_entries(entries, area_ids, entity_id=None, domain=None, device_class=None, state=None, device_class_map=None):
+def filter_logbook_entries(entries, candidate_entities, state=None, events_per_second=1, congestion="skip"):
+    # Filter entries only for candidate entity_ids and matching state (if provided)
     filtered = []
     total_entries = len(entries)
-    unknown_state_filtered = 0
-    entity_id_filtered = 0
-    domain_filtered = 0
-    state_filtered = 0
-    device_class_filtered = 0
-    area_filtered = 0
-
-    # Log the filter conditions being applied
-    filter_conditions = []
-    if entity_id:
-        filter_conditions.append(f"entity_id='{entity_id}'")
-    if domain:
-        filter_conditions.append(f"domain='{domain}'")
-    if state:
-        filter_conditions.append(f"state='{state}'")
-    if device_class:
-        filter_conditions.append(f"device_class='{device_class}'")
-    if area_ids:
-        filter_conditions.append(f"area_ids={area_ids}")
-    
-    _LOGGER.debug("Applying filters: %s", ", ".join(filter_conditions) if filter_conditions else "None")
-
+    # Build a set of candidate entity_ids from the state objects
+    candidate_ids = {s.entity_id for s in candidate_entities} if candidate_entities else set()
     for entry in entries:
         eid = entry.get("entity_id")
         est = entry.get("state")
-        attributes = entry.get("attributes", {})
 
-        # Skip unknown state
-        if est == "unknown":
-            unknown_state_filtered += 1
+        if  est == "unknown":
+            continue
+        if candidate_ids and eid not in candidate_ids:
             continue
 
-        # Filter by entity_id
-        if entity_id and eid != entity_id:
-            entity_id_filtered += 1
-            continue
-
-        # Filter by domain
-        if domain and not eid.startswith(f"{domain}."):
-            domain_filtered += 1
-            continue
-
-        # Filter by state
         if state and est != state:
-            state_filtered += 1
-            continue
-
-        # Filter by device_class
-        dc = attributes.get("device_class") or (device_class_map.get(eid) if device_class_map else None)
-        if device_class and dc != device_class:
-            device_class_filtered += 1
-            continue
-
-        # Filter by area_id (using pre-resolved ids in entry)
-        area_ok = not area_ids or entry.get("resolved_area_id") in area_ids
-        if not area_ok:
-            area_filtered += 1
             continue
 
         filtered.append(entry)
 
-    _LOGGER.debug("Logbook filtering stats: Total entries: %d, Passed filters: %d", total_entries, len(filtered))
-    _LOGGER.debug("Filtered out: Unknown state: %d, Entity ID: %d, Domain: %d, State: %d, Device class: %d, Area: %d", 
-                unknown_state_filtered, entity_id_filtered, domain_filtered, 
-                state_filtered, device_class_filtered, area_filtered)
-
-    return filtered
+    _LOGGER.debug("Logbook filtering: Total entries: %d, After candidate and state filtering: %d", total_entries, len(filtered))
+    
+    # Group entries by second (timestamp truncated to seconds)
+    groups = {}
+    for entry in filtered:
+        try:
+            ts = datetime.fromisoformat(entry.get("when", "").replace("Z", "+00:00")).replace(microsecond=0)
+        except Exception as e:
+            _LOGGER.warning("Invalid timestamp in entry: %s", e)
+            continue
+        groups.setdefault(ts, []).append(entry)
+    
+    # Apply congestion control per second group.
+    result = []
+    for ts in sorted(groups.keys()):
+        group = groups[ts]
+        if len(group) <= events_per_second:
+            result.extend(group)
+        else:
+            if congestion == "skip":
+                result.extend(group[:events_per_second])
+            elif congestion == "summarize":
+                # Use the first event as base and summarize the rest.
+                summary = group[0].copy()
+                extra = len(group) - 1
+                summary_msg = f"and {extra} more events at {ts.strftime('%Y-%m-%d %H:%M:%S')}"
+                # Append the summary info to the description if present.
+                orig_desc = summary.get("description", "")
+                summary["description"] = (orig_desc + " " if orig_desc else "") + summary_msg
+                result.append(summary)
+            else:
+                # Unknown congestion option; fallback to no congestion handling.
+                result.extend(group)
+    return result
 
 # --- Logbook Formatting ---
 def format_logbook_entries(entries, char_limit=262144):
-    output = "Time, Entity, Event"
+    output = "Time, Entity, Event\n"  # header with newline
     used = len(output)
-
+    safe_char_limit = char_limit - (len(output) + 1024)  # reserve space for header
     for entry in entries:
         try:
             utc_time = datetime.fromisoformat(entry.get("when", "").replace("Z", "+00:00"))
@@ -301,19 +289,110 @@ def format_logbook_entries(entries, char_limit=262144):
         dc = entry.get("device_class", "")
 
         name = entry.get("name") or entry.get("attributes", {}).get("friendly_name") or eid
-        description = generate_event_description(dc, state)
-        line = f"{timestamp}, {name}, {description}"
+        device_class = entry.get("device_class", "")
 
+        description = generate_event_description(dc, state)
+        line = f"{timestamp}, {name}, {description}\n"  # add newline after each entry
         if used + len(line) > char_limit:
             _LOGGER.warning("Reached character limit of %d. Truncating output.", char_limit)
             break
-
         output += line
         used += len(line)
-
     return output
 
+# Sample output row:
+# 2025-04-17 16:38:26, Bejárati kamera, motion detected
+
+# --- Utility: Inject Resolved Properties ---
+def inject_resolved_properties(hass, entries, properties):
+    for entry in entries:
+        if entry.get("entity_id") == "sensor.date_time":
+            continue  # Skip sensor.date_time entity
+
+        entity_reg = hass.data.get("entity_registry")
+        device_reg = hass.data.get("device_registry")
+        if not entity_reg:
+            continue
+        ent = entity_reg.entities.get(entry.get("entity_id"))
+        if not ent:
+            continue
+        for prop in properties:
+            if prop == "area":
+                resolved_area_id = ent.area_id or (device_reg.devices.get(ent.device_id).area_id if device_reg and ent.device_id in device_reg.devices else None)
+                area_registry = hass.data.get("area_registry")
+                if area_registry and resolved_area_id and resolved_area_id in area_registry.areas:
+                    entry["area"] = area_registry.areas[resolved_area_id]
+                else:
+                    entry["area"] = None
+            elif prop == "device_class":
+                state = hass.states.get(entry.get("entity_id"))
+                if state:
+                    entry["device_class"] = state.attributes.get("device_class")
+            # ...future property injections...
+    return entries
+
+def gather_candidate_entities(hass, entity_id=None, domain=None, device_class=None, area_ids=None):
+    _LOGGER.debug("Gathering candidate entities with filters: entity_id=%s, domain=%s, device_class=%s, area_ids=%s", entity_id, domain, device_class, area_ids)
+    candidate_entities = []
+    entity_registry = hass.data.get("entity_registry")
+    device_reg = hass.data.get("device_registry")
+    if entity_registry:
+        for ent in entity_registry.entities.values():
+            # Ha az entity nem expozálható, akkor skip
+            expose_option = ent.options.get("conversation", {}).get("should_expose", False)
+            if not expose_option:
+                continue
+            state_obj = hass.states.get(ent.entity_id)
+            # NEW: Skip if state_obj is None
+            if not state_obj:
+                continue
+            # Ha van konkrét entity_id paraméter (feltehetően friendly name, entity_id vagy alias)
+            if entity_id:
+                norm_input = normalize_text(entity_id)
+                friendly = normalize_text(state_obj.attributes.get("friendly_name", ""))
+                actual = normalize_text(state_obj.entity_id)
+                aliases = ent.options.get("aliases", [])
+                norm_aliases = [normalize_text(a) for a in aliases]
+                if friendly != norm_input and actual != norm_input and norm_input not in norm_aliases:
+                    continue
+            # FIX: Ensure domain filter is applied correctly
+            if domain and not any(ent.entity_id.startswith(f"{d}.") for d in domain):
+                continue
+            if domain:
+                #átjutottunk a domain szűrőn, de vajon hogy
+                _LOGGER.debug("Entity %s passed domain filter: %s", ent.entity_id, domain)
+            if device_class and state_obj and state_obj.attributes.get("device_class") != device_class:
+                continue
+            # NEW: Check area inheritance via device registry if entity lacks area_id.
+            area_id = ent.area_id
+            if not area_id and device_reg and ent.device_id in device_reg.devices:
+                area_id = device_reg.devices[ent.device_id].area_id
+            # FIX: Ensure area_ids filter is applied correctly
+            if area_ids and (not area_id or area_id not in area_ids):
+                continue
+            candidate_entities.append(state_obj)
+    return list({s.entity_id: s for s in candidate_entities}.values())
+
 # --- High-Level Query Runner ---
+async def get_raw_entries(hass, url, headers, params, candidate_entities, end_str, max_iter):
+    # If the number of candidates is less than max_iter, fetch using each candidate's entity_id separately
+    if candidate_entities and len(candidate_entities) < max_iter:
+        raw_entries = []
+        for state_obj in candidate_entities:
+            params_local = {"end_time": end_str, "entity_id": state_obj.entity_id}
+            entries = await fetch_logbook_data(hass, url, headers, params_local)
+            raw_entries.extend(entries)
+    else:
+        if candidate_entities and len(candidate_entities) == 1:
+            params["entity_id"] = candidate_entities[0].entity_id
+        raw_entries = await fetch_logbook_data(hass, url, headers, params)
+    # Sort raw_entries by the "when" field to ensure proper time order
+    try:
+        raw_entries.sort(key=lambda entry: datetime.fromisoformat(entry.get("when", "").replace("Z", "+00:00")))
+    except Exception as e:
+        _LOGGER.warning("Failed to sort raw_entries: %s", e)
+    return raw_entries
+
 async def run_log_query(
     hass,
     ha_token,
@@ -350,38 +429,35 @@ async def run_log_query(
         else:
             _LOGGER.warning("Could not resolve entity name '%s' in given area/domain/class", entity_id)
     area_mappings = fetch_area_mappings(hass)
+
     area_ids = resolve_area_ids(area_mappings, area_name_or_alias)
     device_class_map, _ = fetch_entity_mappings(hass)
 
-    # Step 3: Call logbook API
+    # Új megközelítés: candidate list feltöltése teljes state objektummal, nem csak entity_id-val
+    max_iter = 5
+    candidate_entities = gather_candidate_entities(hass, entity_id, domain, device_class, area_ids)
+    # Deduplicate candidate state objects by entity_id
+    candidate_entities = list({s.entity_id: s for s in candidate_entities}.values())
+    # Extra debug logging: if extra filters applied, log detailed candidate entity_ids;
+    # otherwise, log only the total count.
+    if entity_id or domain or device_class or area_ids:
+        _LOGGER.debug("Detailed candidate entities: %s", [s.entity_id for s in candidate_entities])
+    else:
+        _LOGGER.info("Candidate entities count (only expose filter applied): %d", len(candidate_entities))
+    
+
     url = f"{hass.config.internal_url or hass.config.external_url}/api/logbook/{start_str}"
     headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
     params = {"end_time": end_str}
-    if entity_id:
-        params["entity_id"] = entity_id
-    raw_entries = await fetch_logbook_data(hass, url, headers, params)
-
-    # Step 4: Inject resolved area_id into each entry (if available)
-    for entry in raw_entries:
-        resolved = None
-        entity_reg = hass.data.get("entity_registry")
-        device_reg = hass.data.get("device_registry")
-        if entity_reg:
-            ent = entity_reg.entities.get(entry.get("entity_id"))
-            if ent:
-                resolved = ent.area_id or (device_reg.devices.get(ent.device_id).area_id if device_reg and ent.device_id in device_reg.devices else None)
-        entry["resolved_area_id"] = resolved
-
-    # Step 5: Filter entries
-    filtered = filter_logbook_entries(
-        raw_entries,
-        area_ids,
-        entity_id=entity_id,
-        domain=domain,
-        device_class=device_class,
-        state=state,
-        device_class_map=device_class_map
-    )
-
+    
+    # Call the new helper function to get and sort raw entries
+    raw_entries = await get_raw_entries(hass, url, headers, params, candidate_entities, params["end_time"], max_iter)
+    
+    # Step 4: Filter entries using candidate_entities (matching via state_obj.entity_id)
+    filtered = filter_logbook_entries(raw_entries, candidate_entities, state=state)
+    
+    # Step 5: Inject resolved properties into each filtered entry via the generic helper function
+    inject_resolved_properties(hass, filtered, ["area","device_class"])
+    
     # Step 6: Format final output
     return format_logbook_entries(filtered, char_limit)

@@ -8,6 +8,7 @@ def format_events(events):
         state = event.get("state")
         event_type = entity_id.split(".")[0] if entity_id else "unknown"
         device_class = event.get("device_class", "")
+        domain = entity_id.split(".")[1] if entity_id else "unknown"
 
         # Add context as event_description based on device_class
         event_description = ""
@@ -31,6 +32,59 @@ def format_events(events):
                 event_description = "presence detected"
             elif state == "off" or state == "not_home":
                 event_description = "presence stopped"
+        elif domain == "light":
+            if state == "on":
+                event_description = "light turned on"
+            elif state == "off":
+                event_description = "light turned off"
+        elif domain == "switch":
+            if state == "on":
+                event_description = "switch turned on"
+            elif state == "off":
+                event_description = "switch turned off"
+        elif domain == "climate":
+            if state == "heat":
+                event_description = "heating activated"
+            elif state == "cool":
+                event_description = "cooling activated"
+            elif state == "off":
+                event_description = "climate system turned off"
+        elif domain == "sensor":
+            if state == "on":
+                event_description = "sensor activated"
+            elif state == "off":
+                event_description = "sensor deactivated"
+        elif domain == "alarm_control_panel":
+            if state == "armed_away":
+                event_description = "alarm armed away"
+            elif state == "armed_home":
+                event_description = "alarm armed home"
+            elif state == "disarmed":
+                event_description = "alarm disarmed"
+        elif domain == "media_player":
+            if state == "playing":
+                event_description = "media playing"
+            elif state == "paused":
+                event_description = "media paused"
+            elif state == "stopped":
+                event_description = "media stopped" 
+        elif domain == "vacuum":
+            if state == "cleaning":
+                event_description = "vacuum cleaning"
+            elif state == "docked":
+                event_description = "vacuum docked"
+            elif state == "idle":
+                event_description = "vacuum idle"
+        elif domain == "fan":
+            if state == "on":
+                event_description = "fan turned on"
+            elif state == "off":
+                event_description = "fan turned off"
+        elif domain == "water_heater":
+            if state == "on":
+                event_description = "water heater on"
+            elif state == "off":
+                event_description = "water heater off"
                 
         # Format the entry line based on whether we have an event description or not
         entry_text = f"{entity_id} {state}"
