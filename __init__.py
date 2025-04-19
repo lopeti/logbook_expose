@@ -23,11 +23,11 @@ response_dir = os.path.join(script_dir, "response")
 os.makedirs(log_dir, exist_ok=True)
 os.makedirs(response_dir, exist_ok=True)
 
-async def run_log_query(hass, ha_token, question, question_type, area, time_period, entity, domain, device_classes, state, char_limit, start_time, end_time):
+async def run_log_query(hass, ha_token, question, question_type, area, time_period, entity, domain, device_class, state, char_limit, start_time, end_time):
     """Run the log_query logic and return the result."""
 
     try:
-        result = await log_query(hass, ha_token, question, question_type, area, time_period, entity, domain, device_classes, state, char_limit, start_time, end_time)
+        result = await log_query(hass, ha_token, question, question_type, area, time_period, entity, domain, device_class, state, char_limit, start_time, end_time)
         return result
     except Exception as e:
         _LOGGER.error("Error running log_query logic: %s", e)
@@ -72,12 +72,14 @@ async def async_setup(hass: HomeAssistant, config: dict):
         time_period = call.data.get("time_period", "now")
         entity = call.data.get("entity", "")
         domain = call.data.get("domain", "")
-        device_classes = call.data.get("device_classes", "")
+        device_class = call.data.get("device_class", "")
         state = call.data.get("state", "")
         start_time = call.data.get("start_time", "")
         end_time = call.data.get("end_time", "")
 
-        result = await run_log_query(hass, ha_token, question, question_type, area, time_period, entity, domain, device_classes, state, config.get("char_limit", 262144), start_time, end_time)
+
+        result = await run_log_query(hass, ha_token, question, question_type, area, time_period, entity, domain, device_class, state, config.get("char_limit", 262144), start_time, end_time)
+
         hass.states.async_set(
             "logbook_expose.last_result",
             "ok",  # Set a short state value
@@ -88,7 +90,7 @@ async def async_setup(hass: HomeAssistant, config: dict):
                 "time_period": time_period,
                 "entity": entity,
                 "domain": domain,
-                "device_classes": device_classes,
+                "device_class": device_class,
                 "state": state,
                 "logbook": result,  # Store the log result in attributes
                 "start_time": start_time,
@@ -122,12 +124,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         time_period = call.data.get("time_period")
         entity = call.data.get("entity", "")
         domain = call.data.get("domain", "")
-        device_classes = call.data.get("device_classes", "")
+        device_class = call.data.get("device_class", "")
         state = call.data.get("state", "")
         start_time = call.data.get("start_time", "")
         end_time = call.data.get("end_time", "")
 
-        result = await run_log_query(hass, entry.data.get("ha_token"), question, question_type, area, time_period, entity, domain, device_classes, state, entry.options.get("char_limit", 262144), start_time, end_time)
+        result = await run_log_query(hass, entry.data.get("ha_token"), question, question_type, area, time_period, entity, domain, device_class, state, entry.options.get("char_limit", 262144), start_time, end_time)
         hass.states.async_set(
             "logbook_expose.last_result",
             "ok",  # Set a short state value
@@ -140,7 +142,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 "end_time": end_time,
                 "entity": entity,
                 "domain": domain,
-                "device_classes": device_classes,
+                "device_class": device_class,
                 "state": state,
                 "logbook": result,  # Store the log result in attributes
                 "start_time": start_time,

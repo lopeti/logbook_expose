@@ -188,21 +188,38 @@ async def fetch_logbook_data(hass, url, headers, params):
 # --- Logbook Filtering ---
 def filter_logbook_entries(entries, candidate_entities, state=None, events_per_second=1, congestion="skip"):
     # Filter entries only for candidate entity_ids and matching state (if provided)
+    if candidate_entities is None:
+        candidate_entities = []
+    if len(candidate_entities) == 0:
+        _LOGGER.warning("No candidate entities provided for filtering.")
+        return []
+
     filtered = []
     total_entries = len(entries)
     # Build a set of candidate entity_ids from the state objects
     candidate_ids = {s.entity_id for s in candidate_entities} if candidate_entities else set()
+    
+    last_states = {}
     for entry in entries:
         eid = entry.get("entity_id")
         est = entry.get("state")
 
-        if  est == "unknown":
+        if est == "unknown":
+            last_states[eid] = est  # Store the last state as "unknown" for this entity 
             continue
         if candidate_ids and eid not in candidate_ids:
             continue
 
-        #if state and est != state:
-         #   continue
+        # Check if the state is the same as the last recorded state for this entity
+        if eid in last_states and (last_states[eid] == est or last_states.get(eid) == "unknown"):
+            _LOGGER.debug("Skipping entry for entity %s with state %s (last state was %s)", eid, est, last_states[eid]) 
+            # If the state is the same or the last state was "unknown", skip this entry
+            #but update the last state to the current one
+            last_states[eid] = est #to move out from unknown state
+            continue
+
+        # Update the last state for this entity
+        last_states[eid] = est
 
         filtered.append(entry)
 
@@ -324,6 +341,9 @@ def gather_candidate_entities(hass, entity_name_or_id=None, domain=None, device_
                 continue
             state_obj = hass.states.get(ent.entity_id)
             if not state_obj:
+                continue
+            #skip sensor.date_time entity
+            if ent.entity_id == "sensor.date_time":
                 continue
             if entity_name_or_id:
                 norm_input = normalize_text(entity_name_or_id)
